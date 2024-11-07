@@ -15,6 +15,6 @@ spec:
             pathType: ImplementationSpecific
             backend:
               service:
-                name: prometheus.monitoring.svc.cluster.local
+                name: prometheus
                 port:
                   number: 9090
