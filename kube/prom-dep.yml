@@ -18,6 +18,7 @@ spec:
       containers:
         - name: prometheus
           image: artifactory.wureachprod.awswuintranet.net/wucommon-docker-prod-local/aiml_dataiku/dataiku-mad/prometheus:v2.55.1
+          imagePullPolicy: Always
           args:
             - "--config.file=/etc/prometheus/prometheus.yml"
             - "--storage.tsdb.path=/prometheus/"
