@@ -4,13 +4,13 @@ metadata:
   name: prometheus-ingress
   namespace: monitoring
   annotations:
-    nginx.ingress.kubernetes.io/rewrite-target: /
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
 spec:
   rules:
     -
       http:
         paths:
-          - path: /prometheus
+          - path: /prometheus(/|$)(.*)
             pathType: Prefix
             backend:
               service:
