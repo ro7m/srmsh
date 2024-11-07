@@ -6,7 +6,7 @@ metadata:
 spec:
   selector:
     app: prometheus
-  type: NodePort
   ports:
-    targetPort: 12000
+  - port : 9000
+    targetPort: 9000
     protocol: TCP
