@@ -4,16 +4,17 @@ metadata:
   name: prometheus-ingress
   namespace: monitoring
   annotations:
-    nginx.ingress.kubernetes.io/rewrite-target: /$2
+    nginx.ingress.kubernetes.io/rewrite-target: /$1
+    nginx.ingress.kubernetes.io/use-regex: "true"
 spec:
   rules:
     -
       http:
         paths:
           - path: /prometheus(/|$)(.*)
-            pathType: ImplementationSpecific
+            pathType: Prefix
             backend:
               service:
                 name: prometheus
                 port:
-                  number: 30255
+                  number: 9090
