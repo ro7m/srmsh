@@ -14,7 +14,7 @@ spec:
         app: prometheus
     spec:
       imagePullSecrets:
-        - name: wanv-aip-9-eks-dku-dss-001
+        - name: dockerSecrets
       containers:
         - name: prometheus
           image: prom/prometheus:v2.55.1
