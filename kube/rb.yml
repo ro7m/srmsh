@@ -10,6 +10,13 @@ rules:
   - services
   - endpoints
   - pods
+  - persistentvolumeclaims
+  - persistentvolumes
+  - resourcequotas
+  - replicationcontrollers
+  - limitranges
+  - namespaces
+  - secrets
   verbs: ["get", "list", "watch"]
 - apiGroups:
   - extensions
@@ -46,18 +53,16 @@ rules:
   - storageclasses
   - volumeattachments
   verbs: ["get", "list", "watch"]
+- apiGroups:
+  - certificates.k8s.io
+  resources:
+  - certificatesigningrequests
+  verbs: ["get", "list", "watch"]
+- apiGroups:
+  - admissionregistration.k8s.io
+  resources:
+  - mutatingwebhookconfigurations
+  - validatingwebhookconfigurations
+  verbs: ["get", "list", "watch"]
 - nonResourceURLs: ["/metrics"]
   verbs: ["get"]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: prometheus
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: prometheus
-subjects:
-- kind: ServiceAccount
-  name: default
-  namespace: monitoring
