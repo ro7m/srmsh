@@ -13,6 +13,8 @@ spec:
     spec:
       containers:
       - name: node-exporter
-        image: prom/node-exporter:v1.3.1
+        image: artifactory.wureachprod.awswuintranet.net/wucommon-docker-prod-local/aiml_dataiku/dataiku-mad/node-exporter-linux-amd64:v1.8.2
         ports:
         - containerPort: 9100
+      imagePullSecrets:
+      - name: wanv-aip-9-eks-dku-dss-001        
