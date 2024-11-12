@@ -1,8 +1,17 @@
-scrape_configs:
-  - job_name: 'cadvisor'
-    kubernetes_sd_configs:
-      - role: endpoints
-    relabel_configs:
-      - source_labels: [__meta_kubernetes_service_name]
-        action: keep
-        regex: cadvisor
+# Calculate CPU usage for containers with 'id' containing '.scope'
+cpu_usage_with_scope = rate(container_cpu_usage_seconds_total{id=~".*\\.scope.*"}[1m]) * 1000
+
+# Append '_modified' to the 'id' label
+cpu_usage_with_modified_id = label_replace(cpu_usage_with_scope, "modified_id", "$1_modified", "id", "(.*)")
+
+# Join with kube_pod_status_phase to get pod phase
+cpu_usage_with_modified_id_and_phase = cpu_usage_with_modified_id
+/
+on(pod, namespace)
+group_left(phase)
+(
+  kube_pod_status_phase
+)
+
+# Final query to display the result
+cpu_usage_with_modified_id_and_phase
