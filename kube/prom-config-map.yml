@@ -30,6 +30,14 @@ data:
             target_label: __address__
             replacement: '${1}:8080'
 
+      - job_name: 'cadvisor'
+        kubernetes_sd_configs:
+        - role: endpoints
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_service_name]
+            action: keep
+            regex: cadvisor
+
     alerting:
       alertmanagers:
         - static_configs:
