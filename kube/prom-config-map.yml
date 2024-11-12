@@ -34,7 +34,7 @@ data:
         relabel_configs:
             - source_labels: [id]
               regex: '.*cri-containerd-(.*).scope'
-              target_label: container_id
+              target_label: id
               action: keep
               replacement: 'containerd://${1}'        
         
