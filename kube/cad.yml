@@ -21,7 +21,7 @@ spec:
         - mountPath: /rootfs
           name: rootfs
           readOnly: true
-        - mountPath: /var/run
+        - mountPath: /var/run/test
           name: varrun
           readOnly: true
         - mountPath: /sys
