@@ -36,6 +36,7 @@ data:
               regex: '.*cri-containerd-(.*).scope'
               target_label: container_id
               action: keep
+              replacement: 'containerd://${1}'
             - sourceLabels: container_label_io_kubernetes_pod_name  
               target_label: pod
             - sourceLabels: container_label_io_kubernetes_container_name  
