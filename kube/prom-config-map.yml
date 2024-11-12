@@ -32,16 +32,16 @@ data:
 
       - job_name: cadvisor
         relabel_configs:
-            - sourceLabels: [id]
+            - source_labels: [id]
               regex: '.*cri-containerd-(.*).scope'
               target_label: container_id
               action: keep
               replacement: 'containerd://${1}'
-            - sourceLabels: container_label_io_kubernetes_pod_name  
+            - source_labels: container_label_io_kubernetes_pod_name  
               target_label: pod
-            - sourceLabels: container_label_io_kubernetes_container_name  
+            - source_labels: container_label_io_kubernetes_container_name  
               target_label: container              
-            - sourceLabels: container_label_io_kubernetes_pod_namespace  
+            - source_labels: container_label_io_kubernetes_pod_namespace  
               target_label: namespace          
         
         static_configs:
