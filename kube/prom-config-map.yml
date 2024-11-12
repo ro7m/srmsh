@@ -31,6 +31,18 @@ data:
             replacement: '${1}:8080'
 
       - job_name: cadvisor
+        relabel_configs:
+            - sourceLabels: [id]
+              regex: '.*cri-containerd-(.*).scope'
+              target_label: container_id
+              action: keep
+            - sourceLabels: container_label_io_kubernetes_pod_name  
+              target_label: pod
+            - sourceLabels: container_label_io_kubernetes_container_name  
+              target_label: container              
+            - sourceLabels: container_label_io_kubernetes_pod_namespace  
+              target_label: namespace          
+        
         static_configs:
           - targets:
             - cadvisor.kube-system.svc.cluster.local:8080
