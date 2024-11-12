@@ -33,7 +33,7 @@ data:
       - job_name: cadvisor
         static_configs:
           - targets:
-            - cadvisor:8080
+            - cadvisor.kube-system.svc.cluster.local:8080
 
     alerting:
       alertmanagers:
