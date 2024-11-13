@@ -1,0 +1,374 @@
+// Project Structure
+// voice-transcription-java/
+// ├── src/
+// │   ├── com/
+// │   │   └── example/
+// │   │       ├── ui/
+// │   │       │   ├── AudioRecorderPanel.java
+// │   │       │   ├── TranscriptViewerPanel.java
+// │   │       │   └── TemplateManagerPanel.java
+// │   │       ├── services/
+// │   │       │   ├── WhisperService.java
+// │   │       │   ├── DatabaseService.java
+// │   │       │   └── PdfGeneratorService.java
+// │   │       └── VoiceTranscriptionApp.java
+// │   └── resources/
+// │       └── database.properties
+// └── pom.xml
+
+// pom.xml
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>com.example</groupId>
+    <artifactId>voice-transcription</artifactId>
+    <version>1.0-SNAPSHOT</version>
+
+    <properties>
+        <maven.compiler.source>17</maven.compiler.source>
+        <maven.compiler.target>17</maven.compiler.target>
+    </properties>
+
+    <dependencies>
+        <dependency>
+            <groupId>com.squareup.retrofit2</groupId>
+            <artifactId>retrofit</artifactId>
+            <version>2.9.0</version>
+        </dependency>
+        <dependency>
+            <groupId>com.h2database</groupId>
+            <artifactId>h2</artifactId>
+            <version>2.1.214</version>
+        </dependency>
+        <dependency>
+            <groupId>com.itextpdf</groupId>
+            <artifactId>itextpdf</artifactId>
+            <version>5.5.13.3</version>
+        </dependency>
+        <dependency>
+            <groupId>com.github.voicebox-io</groupId>
+            <artifactId>whisper-cpp-java</artifactId>
+            <version>1.0.0</version>
+        </dependency>
+        <dependency>
+            <groupId>org.pushingpixels</groupId>
+            <artifactId>substance</artifactId>
+            <version>8.0.02</version>
+        </dependency>
+    </dependencies>
+</project>
+
+// src/com/example/ui/AudioRecorderPanel.java
+public class AudioRecorderPanel extends JPanel {
+    private WhisperService whisperService;
+    private JButton recordButton;
+    private JTextArea transcriptArea;
+
+    public AudioRecorderPanel(WhisperService whisperService) {
+        this.whisperService = whisperService;
+        initComponents();
+    }
+
+    private void initComponents() {
+        setLayout(new BorderLayout());
+        setBorder(BorderFactory.createEmptyBorder(20, 20, 20, 20));
+
+        recordButton = new JButton("Start Recording");
+        recordButton.addActionListener(e -> startRecording());
+        recordButton.setFont(recordButton.getFont().deriveFont(Font.BOLD, 16f));
+        recordButton.setBackground(new Color(0, 150, 136));
+        recordButton.setForeground(Color.WHITE);
+        recordButton.setBorderPainted(false);
+        recordButton.setFocusPainted(false);
+        recordButton.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+
+        transcriptArea = new JTextArea(5, 40);
+        transcriptArea.setEditable(false);
+        transcriptArea.setLineWrap(true);
+        transcriptArea.setWrapStyleWord(true);
+        JScrollPane scrollPane = new JScrollPane(transcriptArea);
+
+        add(recordButton, BorderLayout.NORTH);
+        add(scrollPane, BorderLayout.CENTER);
+    }
+
+    private void startRecording() {
+        byte[] audioData = captureAudio();
+        String transcript = whisperService.transcribe(audioData);
+        transcriptArea.setText(transcript);
+    }
+
+    private byte[] captureAudio() {
+        // Use Java Sound API to capture audio and return it as a byte array
+        return new byte[0];
+    }
+}
+
+// src/com/example/ui/TranscriptViewerPanel.java
+public class TranscriptViewerPanel extends JPanel {
+    private DatabaseService databaseService;
+    private PdfGeneratorService pdfGeneratorService;
+    private JTextArea transcriptArea;
+    private JButton summarizeButton;
+    private JButton downloadTextButton;
+    private JButton downloadPdfButton;
+
+    public TranscriptViewerPanel(DatabaseService databaseService, PdfGeneratorService pdfGeneratorService) {
+        this.databaseService = databaseService;
+        this.pdfGeneratorService = pdfGeneratorService;
+        initComponents();
+    }
+
+    private void initComponents() {
+        setLayout(new BorderLayout());
+        setBorder(BorderFactory.createEmptyBorder(20, 20, 20, 20));
+
+        transcriptArea = new JTextArea(10, 40);
+        transcriptArea.setEditable(false);
+        transcriptArea.setLineWrap(true);
+        transcriptArea.setWrapStyleWord(true);
+        JScrollPane scrollPane = new JScrollPane(transcriptArea);
+
+        summarizeButton = new JButton("Summarize");
+        summarizeButton.addActionListener(e -> generateSummary(transcriptArea.getText()));
+        summarizeButton.setFont(summarizeButton.getFont().deriveFont(Font.BOLD, 14f));
+        summarizeButton.setBackground(new Color(63, 81, 181));
+        summarizeButton.setForeground(Color.WHITE);
+        summarizeButton.setBorderPainted(false);
+        summarizeButton.setFocusPainted(false);
+        summarizeButton.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+
+        downloadTextButton = new JButton("Download Text");
+        downloadTextButton.addActionListener(e -> downloadText(transcriptArea.getText()));
+        downloadTextButton.setFont(downloadTextButton.getFont().deriveFont(Font.BOLD, 14f));
+        downloadTextButton.setBackground(new Color(76, 175, 80));
+        downloadTextButton.setForeground(Color.WHITE);
+        downloadTextButton.setBorderPainted(false);
+        downloadTextButton.setFocusPainted(false);
+        downloadTextButton.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+
+        downloadPdfButton = new JButton("Download PDF");
+        downloadPdfButton.addActionListener(e -> downloadPdf(transcriptArea.getText()));
+        downloadPdfButton.setFont(downloadPdfButton.getFont().deriveFont(Font.BOLD, 14f));
+        downloadPdfButton.setBackground(new Color(244, 67, 54));
+        downloadPdfButton.setForeground(Color.WHITE);
+        downloadPdfButton.setBorderPainted(false);
+        downloadPdfButton.setFocusPainted(false);
+        downloadPdfButton.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+
+        JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 20, 10));
+        buttonPanel.add(summarizeButton);
+        buttonPanel.add(downloadTextButton);
+        buttonPanel.add(downloadPdfButton);
+
+        add(scrollPane, BorderLayout.CENTER);
+        add(buttonPanel, BorderLayout.SOUTH);
+    }
+
+    private void generateSummary(String text) {
+        // Implement summarization logic using a service or library
+        String summary = "Summary of the text...";
+        JOptionPane.showMessageDialog(this, summary, "Transcript Summary", JOptionPane.INFORMATION_MESSAGE);
+    }
+
+    private void downloadText(String text) {
+        // Use Java IO to write the text to a file and provide a download link
+        saveToFile(text, "transcript.txt");
+    }
+
+    private void downloadPdf(String text) {
+        byte[] pdfData = pdfGeneratorService.generatePdf(text);
+        saveToFile(pdfData, "transcript.pdf");
+    }
+
+    private void saveToFile(Object data, String filename) {
+        // Implementation to save the data to a file and provide a download link
+    }
+}
+
+// src/com/example/ui/TemplateManagerPanel.java
+public class TemplateManagerPanel extends JPanel {
+    private DatabaseService databaseService;
+    private JComboBox<String> templateDropdown;
+    private JTextArea templateTextArea;
+    private JButton saveTemplateButton;
+
+    public TemplateManagerPanel(DatabaseService databaseService) {
+        this.databaseService = databaseService;
+        initComponents();
+    }
+
+    private void initComponents() {
+        setLayout(new BorderLayout());
+        setBorder(BorderFactory.createEmptyBorder(20, 20, 20, 20));
+
+        templateDropdown = new JComboBox<>();
+        templateDropdown.addActionListener(e -> loadSelectedTemplate());
+
+        templateTextArea = new JTextArea(10, 40);
+        templateTextArea.setLineWrap(true);
+        templateTextArea.setWrapStyleWord(true);
+        JScrollPane scrollPane = new JScrollPane(templateTextArea);
+
+        saveTemplateButton = new JButton("Save Template");
+        saveTemplateButton.addActionListener(e -> saveTemplate());
+        saveTemplateButton.setFont(saveTemplateButton.getFont().deriveFont(Font.BOLD, 14f));
+        saveTemplateButton.setBackground(new Color(255, 152, 0));
+        saveTemplateButton.setForeground(Color.WHITE);
+        saveTemplateButton.setBorderPainted(false);
+        saveTemplateButton.setFocusPainted(false);
+        saveTemplateButton.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+
+        JPanel topPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 10));
+        topPanel.add(new JLabel("Select Template:"));
+        topPanel.add(templateDropdown);
+
+        JPanel bottomPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 10, 10));
+        bottomPanel.add(saveTemplateButton);
+
+        add(topPanel, BorderLayout.NORTH);
+        add(scrollPane, BorderLayout.CENTER);
+        add(bottomPanel, BorderLayout.SOUTH);
+
+        loadTemplates();
+    }
+
+    private void loadTemplates() {
+        List<Template> templates = databaseService.getTemplates();
+        for (Template template : templates) {
+            templateDropdown.addItem(template.getName());
+        }
+    }
+
+    private void loadSelectedTemplate() {
+        String selectedName = (String) templateDropdown.getSelectedItem();
+        Template template = databaseService.getTemplateByName(selectedName);
+        templateTextArea.setText(template.getContent());
+    }
+
+    private void saveTemplate() {
+        String name = JOptionPane.showInputDialog("Enter template name:");
+        String content = templateTextArea.getText();
+        databaseService.saveTemplate(name, content);
+        templateDropdown.addItem(name);
+    }
+}
+
+// src/com/example/services/WhisperService.java
+public class WhisperService {
+    private WhisperCPP whisperModel;
+
+    public WhisperService() {
+        whisperModel = new WhisperCPP("base.en");
+    }
+
+    public String transcribe(byte[] audioData) {
+        return whisperModel.transcribe(audioData);
+    }
+}
+
+// src/com/example/services/DatabaseService.java
+public class DatabaseService {
+    private static final String DB_URL = "jdbc:h2:file:./database";
+    private Connection connection;
+
+    public DatabaseService() {
+        try {
+            connection = DriverManager.getConnection(DB_URL);
+            createTemplatesTable();
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+    }
+
+    private void createTemplatesTable() throws SQLException {
+        String sql = "CREATE TABLE IF NOT EXISTS templates (id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR, content TEXT)";
+        try (Statement statement = connection.createStatement()) {
+            statement.executeUpdate(sql);
+        }
+    }
+
+    public List<Template> getTemplates() {
+        List<Template> templates = new ArrayList<>();
+        try (Statement statement = connection.createStatement();
+             ResultSet resultSet = statement.executeQuery("SELECT * FROM templates")) {
+            while (resultSet.next()) {
+                int id = resultSet.getInt("id");
+                String name = resultSet.getString("name");
+                String content = resultSet.getString("content");
+                templates.add(new Template(id, name, content));
+            }
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+        return templates;
+    }
+
+    public Template getTemplateByName(String name) {
+        try (PreparedStatement statement = connection.prepareStatement("SELECT * FROM templates WHERE name = ?")) {
+            statement.setString(1, name);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                if (resultSet.next()) {
+                    int id = resultSet.getInt("id");
+                    String content = resultSet.getString("content");
+                    return new Template(id, name, content);
+                }
+            }
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+        return null;
+    }
+
+    public void saveTemplate(String name, String content) {
+        try (PreparedStatement statement = connection.prepareStatement("INSERT INTO templates (name, content) VALUES (?, ?)")) {
+            statement.setString(1, name);
+            statement.setString(2, content);
+            statement.executeUpdate();
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+    }
+}
+
+// src/com/example/services/PdfGeneratorService.java
+public class PdfGeneratorService {
+    public byte[] generatePdf(String text) {
+        Document document = new Document();
+        try {
+            ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+            PdfWriter.getInstance(document, outputStream);
+            document.open();
+            document.add(new Paragraph(text));
+            document.close();
+            return outputStream.toByteArray();
+        } catch (DocumentException | IOException e) {
+            e.printStackTrace();
+        }
+        return new byte[0];
+    }
+}
+
+// src/com/example/VoiceTranscriptionApp.java
+public class VoiceTranscriptionApp extends JFrame {
+    public VoiceTranscriptionApp() {
+        setTitle("Voice Transcription");
+        setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+        setSize(800, 600);
+        setLocationRelativeTo(null);
+
+        DatabaseService databaseService = new DatabaseService();
+        WhisperService whisperService = new WhisperService();
+        PdfGeneratorService pdfGeneratorService = new PdfGeneratorService();
+
+        JTabbedPane tabbedPane = new JTabbedPane();
+        tabbedPane.addTab("Audio Recorder", new AudioRecorderPanel(whisperService));
+        tabbedPane.addTab("Transcript Viewer", new TranscriptViewerPanel(databaseService, pdfGeneratorService));
+        tabbedPane.addTab("Template Manager", new TemplateManagerPanel(databaseService));
+
+        add(tabbedPane, BorderLayout.CENTER);
+
+        // Set the Substance look and feel
+        SubstanceLookAndFeel.setSkin("org.pushingpixels.substance.api.skin.BusinessSkin");
+        SwingUtilities.updateComponentTreeUI(this);
