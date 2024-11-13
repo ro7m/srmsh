@@ -362,6 +362,18 @@ public class VoiceTranscriptionApp extends JFrame {
         WhisperService whisperService = new WhisperService();
         PdfGeneratorService pdfGeneratorService = new PdfGeneratorService();
 
+// src/com/example/VoiceTranscriptionApp.java (continued)
+public static void main(String[] args) {
+    SwingUtilities.invokeLater(() -> {
+        try {
+            // Set the Substance look and feel
+            UIManager.setLookAndFeel(new SubstanceLookAndFeel());
+            new VoiceTranscriptionApp().setVisible(true);
+        } catch (UnsupportedLookAndFeelException e) {
+            e.printStackTrace();
+        }
+    });
+}
         JTabbedPane tabbedPane = new JTabbedPane();
         tabbedPane.addTab("Audio Recorder", new AudioRecorderPanel(whisperService));
         tabbedPane.addTab("Transcript Viewer", new TranscriptViewerPanel(databaseService, pdfGeneratorService));
@@ -372,3 +384,4 @@ public class VoiceTranscriptionApp extends JFrame {
         // Set the Substance look and feel
         SubstanceLookAndFeel.setSkin("org.pushingpixels.substance.api.skin.BusinessSkin");
         SwingUtilities.updateComponentTreeUI(this);
+}}
