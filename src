@@ -1,87 +1,239 @@
+package org.voice.ui;
 
-<dependency>
-            <groupId>org.jaudiotagger</groupId>
-            <artifactId>jaudiotagger</artifactId>
-            <version>2.0.1</version>
-        </dependency>
-        <dependency>
-            <groupId>org.slf4j</groupId>
-            <artifactId>slf4j-api</artifactId>
-            <version>1.7.36</version>
-        </dependency>
-        <dependency>
-            <groupId>org.slf4j</groupId>
-            <artifactId>slf4j-simple</artifactId>
-            <version>1.7.36</version>
-        </dependency>
-    /////
+import org.voice.service.PdfGeneratorService;
+import org.voice.service.WhisperService;
 
-
-
-
-import javax.sound.sampled.*;
+import javax.sound.sampled.UnsupportedAudioFileException;
+import javax.swing.*;
+import javax.swing.filechooser.FileNameExtensionFilter;
+import java.awt.*;
 import java.io.File;
+import java.io.FileOutputStream;
 import java.io.IOException;
 
-public class AudioConverter {
-    private static final int TARGET_SAMPLE_RATE = 16000;
-    private static final int TARGET_SAMPLE_SIZE = 16;
-    private static final int TARGET_CHANNELS = 1;
 
-    public static void convertAudioFile(String inputPath, String outputPath) throws UnsupportedAudioFileException, IOException {
-        File inputFile = new File(inputPath);
-        File outputFile = new File(outputPath);
+public class AudioRecorderPanel extends JPanel {
+    private WhisperService whisperService;
+    private JButton fileChooserButton;
+    private JFileChooser fileChooser;
+    private JTextArea transcriptArea;
+    private JButton summarizeButton;
+    private JButton downloadTextButton;
+    private JButton downloadPdfButton;
+    private PdfGeneratorService pdfGeneratorService;
 
-        // Read the input audio file
-        AudioInputStream audioInputStream = AudioSystem.getAudioInputStream(inputFile);
-        AudioFormat sourceFormat = audioInputStream.getFormat();
-
-        // Check if conversion is needed
-        if (needsConversion(sourceFormat)) {
-            System.out.println("Converting audio file to match required specifications...");
-            
-            // Create the target audio format
-            AudioFormat targetFormat = new AudioFormat(
-                AudioFormat.Encoding.PCM_SIGNED,
-                TARGET_SAMPLE_RATE,
-                TARGET_SAMPLE_SIZE,
-                TARGET_CHANNELS,
-                TARGET_CHANNELS * (TARGET_SAMPLE_SIZE / 8),
-                TARGET_SAMPLE_RATE,
-                false);
-
-            // Convert to the target format
-            AudioInputStream convertedStream = AudioSystem.getAudioInputStream(targetFormat, audioInputStream);
-
-            // Write the converted audio to the output file
-            AudioSystem.write(convertedStream, AudioFileFormat.Type.WAVE, outputFile);
-
-            // Clean up
-            convertedStream.close();
-            System.out.println("Conversion completed successfully!");
-        } else {
-            System.out.println("Audio file already meets specifications. Creating a copy...");
-            AudioSystem.write(audioInputStream, AudioFileFormat.Type.WAVE, outputFile);
-        }
-
-        audioInputStream.close();
+    public AudioRecorderPanel(WhisperService whisperService) {
+        this.whisperService = whisperService;
+        initComponents();
     }
 
-    private static boolean needsConversion(AudioFormat format) {
-        return format.getSampleRate() != TARGET_SAMPLE_RATE ||
-               format.getSampleSizeInBits() != TARGET_SAMPLE_SIZE ||
-               format.getChannels() != TARGET_CHANNELS;
+    private void initComponents() {
+
+        pdfGeneratorService = new PdfGeneratorService();
+        JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 20, 10));
+
+        setLayout(new BorderLayout());
+        setBorder(BorderFactory.createEmptyBorder(20, 20, 20, 20));
+        fileChooserButton = new JButton("Upload");
+        fileChooserButton.setFont(fileChooserButton.getFont().deriveFont(Font.BOLD, 14f));
+        fileChooserButton.setBackground(new Color(42, 150, 0));
+        fileChooserButton.setForeground(Color.BLACK);
+        fileChooserButton.setBorderPainted(false);
+        fileChooserButton.setFocusPainted(false);
+        fileChooserButton.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        fileChooserButton.setBounds(100, 50, 200, 30);
+        fileChooserButton.addActionListener(e -> {
+            fileChooser = new JFileChooser(".");
+            fileChooser.setDialogTitle("choose the audio file");
+            fileChooser.setFileSelectionMode(JFileChooser.FILES_ONLY);
+            fileChooser.setFileFilter(new FileNameExtensionFilter("Audio files (.wav,.mp3) ", "wav", "mp3"));
+
+            int result = fileChooser.showOpenDialog(null);
+
+            if (result == JFileChooser.APPROVE_OPTION) {
+                File selectedFile = fileChooser.getSelectedFile();
+                System.out.println("selected file " + selectedFile);
+                startTranscribing(selectedFile);
+            }
+        });
+
+        transcriptArea = new JTextArea(5, 40);
+        transcriptArea.setEditable(true);
+        transcriptArea.setBorder(BorderFactory.createCompoundBorder(BorderFactory.createLineBorder(Color.GRAY, 1), BorderFactory.createEmptyBorder(5, 5, 5, 5)));
+        transcriptArea.setLineWrap(true);
+        transcriptArea.setWrapStyleWord(true);
+        JScrollPane scrollPane = new JScrollPane(transcriptArea);
+
+        buttonPanel.add(fileChooserButton, BorderLayout.CENTER);
+        add(buttonPanel, BorderLayout.NORTH);
+        add(scrollPane, BorderLayout.CENTER);
+
+
+        summarizeButton = new JButton("Summarize");
+        summarizeButton.addActionListener(e -> generateSummary());
+        summarizeButton.setFont(summarizeButton.getFont().deriveFont(Font.BOLD, 14f));
+        summarizeButton.setBackground(new Color(42, 150, 0));
+        summarizeButton.setForeground(Color.BLACK);
+        summarizeButton.setBorderPainted(false);
+        summarizeButton.setFocusPainted(false);
+        summarizeButton.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+
+        downloadTextButton = new JButton("Download Text");
+        downloadTextButton.addActionListener(e -> downloadText());
+        downloadTextButton.setFont(downloadTextButton.getFont().deriveFont(Font.BOLD, 14f));
+        downloadTextButton.setBackground(new Color(42, 150, 0));
+        downloadTextButton.setForeground(Color.BLACK);
+        downloadTextButton.setBorderPainted(false);
+        downloadTextButton.setFocusPainted(false);
+        downloadTextButton.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+
+        downloadPdfButton = new JButton("Download PDF");
+        downloadPdfButton.addActionListener(e -> downloadPdf());
+        downloadPdfButton.setFont(downloadPdfButton.getFont().deriveFont(Font.BOLD, 14f));
+        downloadPdfButton.setBackground(new Color(42, 150, 0));
+        downloadPdfButton.setForeground(Color.BLACK);
+        downloadPdfButton.setBorderPainted(false);
+        downloadPdfButton.setFocusPainted(false);
+        downloadPdfButton.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+
+        JPanel summaryButtonPanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 20, 10));
+        buttonPanel.add(summarizeButton);
+        buttonPanel.add(downloadTextButton);
+        buttonPanel.add(downloadPdfButton);
+        add(summaryButtonPanel, BorderLayout.SOUTH);
+
     }
 
-    // Example usage
-    public static void main(String[] args) {
+    private void startTranscribing(File selectedFile) {
+        String transcript = null;
         try {
-            String inputPath = "input.mp3"; // Replace with your input file path
-            String outputPath = "output.wav";
-            convertAudioFile(inputPath, outputPath);
+            transcript = whisperService.transcribe(whisperService.processAudioFile(selectedFile));
         } catch (UnsupportedAudioFileException | IOException e) {
-            System.err.println("Error converting audio file: " + e.getMessage());
-            e.printStackTrace();
+            throw new RuntimeException(e);
+        }
+        transcriptArea.setText(transcript);
+    }
+
+    private byte[] captureAudio() {
+        return new byte[0];
+    }
+
+    private void generateSummary() {
+        String summary = "Summary of the text...";
+        JOptionPane.showMessageDialog(this, summary, "Transcript Summary", JOptionPane.INFORMATION_MESSAGE);
+    }
+
+    private void downloadText() {
+        saveToFile(transcriptArea.getText(), "transcript.txt");
+    }
+
+    private void downloadPdf() {
+        byte[] pdfData = pdfGeneratorService.generatePdf(transcriptArea.getText());
+        saveToFile(pdfData, "transcript.pdf");
+    }
+
+    private void saveToFile(Object data, String filename) {
+        JFileChooser fileChooser = new JFileChooser();
+        fileChooser.setDialogTitle("Save File");
+        fileChooser.setSelectedFile(new File(filename));
+
+        int userSelection = fileChooser.showSaveDialog(this);
+        if (userSelection == JFileChooser.APPROVE_OPTION) {
+            File fileToSave = fileChooser.getSelectedFile();
+            try {
+                if (data instanceof String) {
+                    writeTextToFile((String) data, fileToSave);
+                } else if (data instanceof byte[]) {
+                    writeBytesToFile((byte[]) data, fileToSave);
+                }
+            } catch (IOException e) {
+                JOptionPane.showMessageDialog(this, "Error saving file: " + e.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
+            }
         }
     }
+
+    private void writeTextToFile(String text, File file) throws IOException {
+        try (FileOutputStream fos = new FileOutputStream(file)) {
+            fos.write(text.getBytes());
+        }
+    }
+
+    private void writeBytesToFile(byte[] data, File file) throws IOException {
+        try (FileOutputStream fos = new FileOutputStream(file)) {
+            fos.write(data);
+        }
+    }
+}
+
+/////////
+
+
+public class WhisperService {
+    public WhisperJNI whisper;
+    public WhisperContext whisperContext;
+
+    public WhisperService() {
+        var loadOptions = new WhisperJNI.LoadOptions();
+        loadOptions.logger = System.out::println;
+        try {
+            WhisperJNI.loadLibrary(loadOptions);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+        WhisperJNI.setLibraryLogger(null);
+        whisper = new WhisperJNI();
+        String modelName = "/tmp/ggml-base.en-q5_0.bin";
+        try {
+            whisperContext = whisper.init(Path.of(modelName));
+        } catch (IOException e) {
+            System.out.println("Model " + modelName + " not found");
+        }
+    }
+
+    public String transcribe(float[] audioData) {
+
+        StringBuilder fulltext = new StringBuilder();
+        try (var ctx = whisperContext) {
+            var params = new WhisperFullParams(WhisperSamplingStrategy.GREEDY);
+            int result = whisper.full(ctx, params, audioData, audioData.length);
+            if (result != 0) {
+                throw new RuntimeException("Transcription failed with code " + result);
+            }
+            int numSegments = whisper.fullNSegments(ctx);
+            for (int i = 0; i < numSegments; i++) {
+                String segmentText = whisper.fullGetSegmentText(ctx, i);
+                if (segmentText != null && !segmentText.isEmpty()) {
+                    fulltext.append(segmentText).append(" ");
+                }
+            }
+            return fulltext.toString().trim();
+        }
+
+    }
+
+    public float[] processAudioFile(File infile) throws UnsupportedAudioFileException, IOException {
+        // sample is a 16 bit int 16000hz little endian wav file
+        String outputFile = "/tmp/cnv.wav";
+        Path samplePath = Path.of(outputFile);
+        AudioConverter.convertAudioFile(infile, new File(outputFile));
+        AudioInputStream audioInputStream = AudioSystem.getAudioInputStream(samplePath.toFile());
+        // read all the available data to a little endian capture buffer
+        ByteBuffer captureBuffer = ByteBuffer.allocate(audioInputStream.available());
+        captureBuffer.order(ByteOrder.LITTLE_ENDIAN);
+        int read = audioInputStream.read(captureBuffer.array());
+        if (read == -1) {
+            throw new IOException("Empty file");
+        }
+        // obtain the 16 int audio samples, short type in java
+        var shortBuffer = captureBuffer.asShortBuffer();
+        // transform the samples to f32 samples
+        float[] samples = new float[captureBuffer.capacity() / 2];
+        var i = 0;
+        while (shortBuffer.hasRemaining()) {
+            samples[i++] = Float.max(-1f, Float.min(((float) shortBuffer.get()) / (float) Short.MAX_VALUE, 1f));
+        }
+        return samples;
+    }
+
+
 }
