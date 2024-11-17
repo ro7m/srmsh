@@ -1,77 +1,184 @@
-<project>
-    <!-- ... -->
-    <build>
-        <plugins>
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-compiler-plugin</artifactId>
-                <version>3.8.1</version>
-                <configuration>
-                    <source>${maven.compiler.source}</source>
-                    <target>${maven.compiler.target}</target>
-                </configuration>
-            </plugin>
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-jar-plugin</artifactId>
-                <version>3.2.0</version>
-                <configuration>
-                    <archive>
-                        <manifest>
-                            <addClasspath>true</addClasspath>
-                            <mainClass>com.example.VoiceTranscriptionApp</mainClass>
-                        </manifest>
-                    </archive>
-                </configuration>
-            </plugin>
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-shade-plugin</artifactId>
-                <version>3.2.4</version>
-                <executions>
-                    <execution>
-                        <phase>package</phase>
-                        <goals>
-                            <goal>shade</goal>
-                        </goals>
-                    </execution>
-                </executions>
-            </plugin>
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-surefire-plugin</artifactId>
-                <version>3.0.0-M5</version>
-            </plugin>
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-native-plugin</artifactId>
-                <version>1.0.b6</version>
-                <executions>
-                    <execution>
-                        <id>compile-native</id>
-                        <phase>compile</phase>
-                        <goals>
-                            <goal>compile</goal>
-                        </goals>
-                    </execution>
-                </executions>
-                <configuration>
-                    <mainSource>WhisperJNI.cpp</mainSource>
-                    <sourceDir>src/main/cpp</sourceDir>
-                    <outputDirectory>target/native</outputDirectory>
-                    <compilerProvider>generic</compilerProvider>
-                    <compilerExecutable>g++</compilerExecutable>
-                    <compilerArgs>
-                        <arg>-I${env.JAVA_HOME}/include</arg>
-                        <arg>-I${env.JAVA_HOME}/include/linux</arg>
-                        <arg>-I./src/main/resources/whisper-model</arg>
-                        <arg>-std=c++11</arg>
-                        <arg>-shared</arg>
-                        <arg>-o</arg>
-                        <arg>target/native/libwhisper.so</arg>
-                    </compilerArgs>
-                </configuration>
-            </plugin>
-        </plugins>
-    </build>
-</project>
+// First, modify the WhisperService class:
+
+public class WhisperService {
+    public WhisperJNI whisper;
+    public WhisperContext whisperContext;
+    private ProgressCallback progressCallback;
+
+    public interface ProgressCallback {
+        void onProgress(int progress);
+    }
+
+    public void setProgressCallback(ProgressCallback callback) {
+        this.progressCallback = callback;
+    }
+
+    public WhisperService() {
+        var loadOptions = new WhisperJNI.LoadOptions();
+        loadOptions.logger = System.out::println;
+        try {
+            WhisperJNI.loadLibrary(loadOptions);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+        WhisperJNI.setLibraryLogger(null);
+        whisper = new WhisperJNI();
+    }
+
+    public void initializeModel(File modelFile) throws IOException {
+        if (whisperContext != null) {
+            whisperContext.close();
+        }
+        whisperContext = whisper.init(modelFile.toPath());
+    }
+
+    public String transcribe(float[] audioData) {
+        StringBuilder fulltext = new StringBuilder();
+        try (var ctx = whisperContext) {
+            var params = new WhisperFullParams(WhisperSamplingStrategy.GREEDY);
+            
+            // Set up progress monitoring
+            params.setProgressCallback((int progress) -> {
+                if (progressCallback != null) {
+                    progressCallback.onProgress(progress);
+                }
+            });
+
+            int result = whisper.full(ctx, params, audioData, audioData.length);
+            if (result != 0) {
+                throw new RuntimeException("Transcription failed with code " + result);
+            }
+            int numSegments = whisper.fullNSegments(ctx);
+            for (int i = 0; i < numSegments; i++) {
+                String segmentText = whisper.fullGetSegmentText(ctx, i);
+                if (segmentText != null && !segmentText.isEmpty()) {
+                    fulltext.append(segmentText).append(" ");
+                }
+            }
+            return fulltext.toString().trim();
+        }
+    }
+
+    // ... rest of the WhisperService class remains the same ...
+}
+
+// Then modify the AudioRecorderPanel class:
+
+public class AudioRecorderPanel extends JPanel {
+    private WhisperService whisperService;
+    private JButton fileChooserButton;
+    private JButton modelChooserButton;
+    private JFileChooser fileChooser;
+    private JTextArea transcriptArea;
+    private JProgressBar progressBar;
+    private JLabel modelLabel;
+    // ... other existing fields ...
+
+    private void initComponents() {
+        pdfGeneratorService = new PdfGeneratorService();
+        JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 20, 10));
+
+        setLayout(new BorderLayout());
+        setBorder(BorderFactory.createEmptyBorder(20, 20, 20, 20));
+
+        // Add model selection button
+        modelChooserButton = new JButton("Select Model");
+        modelChooserButton.setFont(modelChooserButton.getFont().deriveFont(Font.BOLD, 14f));
+        modelChooserButton.setBackground(new Color(42, 150, 0));
+        modelChooserButton.setForeground(Color.BLACK);
+        modelChooserButton.setBorderPainted(false);
+        modelChooserButton.setFocusPainted(false);
+        modelChooserButton.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        modelChooserButton.addActionListener(e -> selectModel());
+
+        // Add model label
+        modelLabel = new JLabel("No model selected");
+        modelLabel.setForeground(Color.GRAY);
+
+        // Add progress bar
+        progressBar = new JProgressBar(0, 100);
+        progressBar.setStringPainted(true);
+        progressBar.setVisible(false);
+
+        // Existing file chooser button setup...
+        fileChooserButton.setEnabled(false); // Disable until model is selected
+
+        // Add components to button panel
+        JPanel modelPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        modelPanel.add(modelChooserButton);
+        modelPanel.add(modelLabel);
+
+        buttonPanel.add(modelPanel);
+        buttonPanel.add(fileChooserButton);
+        buttonPanel.add(progressBar);
+
+        // ... rest of the initialization ...
+    }
+
+    private void selectModel() {
+        JFileChooser modelChooser = new JFileChooser(".");
+        modelChooser.setDialogTitle("Select Whisper Model File");
+        modelChooser.setFileFilter(new FileNameExtensionFilter("Whisper Model Files (*.bin)", "bin"));
+        
+        int result = modelChooser.showOpenDialog(this);
+        if (result == JFileChooser.APPROVE_OPTION) {
+            File selectedModel = modelChooser.getSelectedFile();
+            try {
+                whisperService.initializeModel(selectedModel);
+                modelLabel.setText("Model: " + selectedModel.getName());
+                fileChooserButton.setEnabled(true);
+            } catch (IOException ex) {
+                JOptionPane.showMessageDialog(this, 
+                    "Error loading model: " + ex.getMessage(),
+                    "Model Load Error",
+                    JOptionPane.ERROR_MESSAGE);
+            }
+        }
+    }
+
+    private void startTranscribing(File selectedFile) {
+        // Disable buttons during transcription
+        fileChooserButton.setEnabled(false);
+        modelChooserButton.setEnabled(false);
+        progressBar.setValue(0);
+        progressBar.setVisible(true);
+
+        // Set up progress callback
+        whisperService.setProgressCallback(progress -> {
+            SwingUtilities.invokeLater(() -> {
+                progressBar.setValue(progress);
+            });
+        });
+
+        // Run transcription in background thread
+        SwingWorker<String, Void> worker = new SwingWorker<>() {
+            @Override
+            protected String doInBackground() throws Exception {
+                return whisperService.transcribe(
+                    whisperService.processAudioFile(selectedFile));
+            }
+
+            @Override
+            protected void done() {
+                try {
+                    String transcript = get();
+                    transcriptArea.setText(transcript);
+                } catch (Exception ex) {
+                    JOptionPane.showMessageDialog(AudioRecorderPanel.this,
+                        "Error during transcription: " + ex.getMessage(),
+                        "Transcription Error",
+                        JOptionPane.ERROR_MESSAGE);
+                } finally {
+                    // Re-enable buttons and hide progress bar
+                    fileChooserButton.setEnabled(true);
+                    modelChooserButton.setEnabled(true);
+                    progressBar.setVisible(false);
+                }
+            }
+        };
+
+        worker.execute();
+    }
+
+    // ... rest of the AudioRecorderPanel class remains the same ...
+}
