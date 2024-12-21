@@ -1,0 +1,17 @@
+allprojects {
+    gradle.startParameter.systemPropertiesArgs.put("javax.net.ssl.trustStore", "")
+    gradle.startParameter.systemPropertiesArgs.put("javax.net.ssl.trustStorePassword", "")
+    
+    def trustAll = new javax.net.ssl.X509TrustManager() {
+        X509Certificate[] getAcceptedIssuers() { null }
+        void checkClientTrusted(X509Certificate[] certs, String authType) {}
+        void checkServerTrusted(X509Certificate[] certs, String authType) {}
+    }
+    def noopHostVerifier = new javax.net.ssl.HostnameVerifier() {
+        boolean verify(String hostname, javax.net.ssl.SSLSession session) { true }
+    }
+    javax.net.ssl.SSLContext sc = javax.net.ssl.SSLContext.getInstance("TLS")
+    sc.init(null, [trustAll] as javax.net.ssl.TrustManager[], new java.security.SecureRandom())
+    javax.net.ssl.HttpsURLConnection.setDefaultSSLSocketFactory(sc.socketFactory)
+    javax.net.ssl.HttpsURLConnection.setDefaultHostnameVerifier(noopHostVerifier)
+}
