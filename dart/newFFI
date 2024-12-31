@@ -1,0 +1,673 @@
+
+
+
+
+----------------------------------
+First, create the main app file (lib/main.dart):
+
+
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'screens/scanner_screen.dart';
+import 'services/ocr_service.dart';
+
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  
+  // Initialize OCR Service
+  final ocrService = OCRService();
+  await ocrService.initialize();
+  
+  runApp(
+    Provider<OCRService>.value(
+      value: ocrService,
+      child: MyApp(),
+    ),
+  );
+}
+
+class MyApp extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'OCR Scanner',
+      theme: ThemeData(
+        primarySwatch: Colors.blue,
+        useMaterial3: true,
+        appBarTheme: AppBarTheme(
+          backgroundColor: Colors.blue,
+          foregroundColor: Colors.white,
+        ),
+      ),
+      home: ScannerScreen(),
+    );
+  }
+}
+
+----------------------
+Create a config file for constants (lib/config/app_config.dart):
+
+
+class AppConfig {
+  static const String appName = 'OCR Scanner';
+  
+  // OCR Configuration
+  static const int maxImageSize = 1024;
+  static const double minConfidence = 0.5;
+  
+  // Error Messages
+  static const String errorInitializing = 'Error initializing OCR service';
+  static const String errorProcessingImage = 'Error processing image';
+  static const String errorNoImageSelected = 'No image selected';
+  
+  // Success Messages
+  static const String successProcessing = 'Processing complete';
+}
+-----------------------------
+Add an app state manager (lib/state/app_state.dart):
+
+import 'package:flutter/foundation.dart';
+import '../models/ocr_result.dart';
+
+class AppState extends ChangeNotifier {
+  bool _isProcessing = false;
+  OCRResponse? _lastResult;
+  String? _error;
+
+  bool get isProcessing => _isProcessing;
+  OCRResponse? get lastResult => _lastResult;
+  String? get error => _error;
+
+  void setProcessing(bool processing) {
+    _isProcessing = processing;
+    notifyListeners();
+  }
+
+  void setResult(OCRResponse result) {
+    _lastResult = result;
+    _error = null;
+    notifyListeners();
+  }
+
+  void setError(String error) {
+    _error = error;
+    notifyListeners();
+  }
+
+  void reset() {
+    _isProcessing = false;
+    _lastResult = null;
+    _error = null;
+    notifyListeners();
+  }
+}
+-----------------
+// lib/main.dart
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'screens/scanner_screen.dart';
+import 'services/ocr_service.dart';
+import 'state/app_state.dart';
+import 'config/app_config.dart';
+
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  // Initialize services
+  final ocrService = OCRService();
+  await ocrService.initialize().catchError((error) {
+    debugPrint('Initialization error: $error');
+  });
+
+  runApp(
+    MultiProvider(
+      providers: [
+        Provider<OCRService>.value(value: ocrService),
+        ChangeNotifierProvider(create: (_) => AppState()),
+      ],
+      child: MyApp(),
+    ),
+  );
+}
+
+class MyApp extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: AppConfig.appName,
+      theme: ThemeData(
+        primarySwatch: Colors.blue,
+        useMaterial3: true,
+        appBarTheme: AppBarTheme(
+          backgroundColor: Colors.blue,
+          foregroundColor: Colors.white,
+        ),
+      ),
+      home: ScannerScreen(),
+      builder: (context, child) {
+        return Column(
+          children: [
+            Expanded(child: child!),
+            // Error display
+            Consumer<AppState>(
+              builder: (context, state, _) {
+                if (state.error != null) {
+                  return Container(
+                    color: Colors.red[100],
+                    padding: EdgeInsets.all(8),
+                    child: Text(
+                      state.error!,
+                      style: TextStyle(color: Colors.red[900]),
+                    ),
+                  );
+                }
+                return SizedBox.shrink();
+              },
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+-----------------------
+Add error handling utilities (lib/utils/error_handler.dart):
+
+import 'package:flutter/foundation.dart';
+
+class ErrorHandler {
+  static void handleError(dynamic error, {String? context}) {
+    // Log error
+    debugPrint('Error in $context: $error');
+    
+    // You could add crash reporting here
+    // Crashlytics.instance.recordError(error, StackTrace.current);
+    
+    // Return user-friendly message
+    return _getUserFriendlyMessage(error);
+  }
+
+  static String _getUserFriendlyMessage(dynamic error) {
+    if (error.toString().contains('Permission denied')) {
+      return 'Please grant camera and storage permissions';
+    }
+    if (error.toString().contains('OCR initialization failed')) {
+      return 'Failed to start OCR service. Please restart the app';
+    }
+    return 'An unexpected error occurred. Please try again';
+  }
+}
+
+----------------
+Add navigation service (lib/services/navigation_service.dart):
+
+import 'package:flutter/material.dart';
+
+class NavigationService {
+  static final GlobalKey<NavigatorState> navigatorKey = 
+      GlobalKey<NavigatorState>();
+
+  static Future<T?> navigateTo<T>(String routeName, {Object? arguments}) {
+    return navigatorKey.currentState!
+        .pushNamed(routeName, arguments: arguments);
+  }
+
+  static void goBack() {
+    return navigatorKey.currentState!.pop();
+  }
+}
+
+-----
+
+name: my_ocr_app
+description: OCR app using Python OnnxTR
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+
+my_ocr_app/
+├── android/
+├── ios/
+├── lib/
+│   ├── native/
+│   │   ├── bridge/
+│   │   │   ├── ffi_bridge.dart
+│   │   │   └── python_bridge.py
+│   │   └── models/
+│   │       ├── detection_model.onnx
+│   │       └── recognition_model.onnx
+│   ├── services/
+│   │   ├── ocr_service.dart
+│   │   └── image_service.dart
+│   ├── models/
+│   │   ├── ocr_result.dart
+│   │   └── bounding_box.dart
+│   ├── screens/
+│   │   └── scanner_screen.dart
+│   └── main.dart
+├── python/
+│   ├── requirements.txt
+│   ├── setup.py
+│   └── ocr_bridge/
+│       ├── __init__.py
+│       └── bridge.py
+├── scripts/
+│   ├── build_android.sh
+│   ├── build_ios.sh
+│   └── build_windows.bat
+└── pubspec.yaml
+
+
+
+
+-----------------
+
+dependencies:
+  flutter:
+    sdk: flutter
+  provider: ^6.0.5
+  path_provider: ^2.1.1
+  image_picker: ^1.0.4
+  ffi: ^2.1.0
+  path: ^1.8.3
+  json_annotation: ^4.8.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  build_runner: ^2.4.6
+  json_serializable: ^6.7.1
+
+--
+dependencies:
+  flutter:
+    sdk: flutter
+  ffi: ^2.1.0
+  path: ^1.8.3
+  image_picker: ^1.0.4
+  path_provider: ^2.1.1
+  json_annotation: ^4.8.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  build_runner: ^2.4.6
+  json_serializable: ^6.7.1
+
+flutter:
+  uses-material-design: true
+  assets:
+    - lib/native/models/
+----------------------------
+
+Create the Python bridge code (python/ocr_bridge/bridge.py):
+
+
+import os
+import sys
+import json
+import numpy as np
+from typing import Dict, Any
+from onnxtr.models import ocr_predictor
+from onnxtr.io import DocumentFile
+
+class OCRBridge:
+    def __init__(self):
+        self._initialize_predictor()
+
+    def _initialize_predictor(self):
+        try:
+            self.predictor = ocr_predictor(
+                det_arch='db_resnet50',
+                reco_arch='crnn_vgg16_bn',
+                pretrained=True
+            )
+        except Exception as e:
+            print(f"Error initializing predictor: {e}", file=sys.stderr)
+            raise
+
+    def process_image(self, image_path: str) -> Dict[str, Any]:
+        try:
+            # Load and process image
+            doc = DocumentFile.from_images(image_path)
+            result = self.predictor(doc)
+
+            # Extract results
+            words = result.export()['words']
+            boxes = result.export()['boxes']
+            
+            return {
+                'status': 'success',
+                'results': [{
+                    'text': word.value,
+                    'confidence': float(word.confidence),
+                    'box': box.tolist()
+                } for word, box in zip(words, boxes)]
+            }
+        except Exception as e:
+            return {
+                'status': 'error',
+                'message': str(e)
+            }
+
+    def __del__(self):
+        # Cleanup
+        self.predictor = None
+
+-------------------
+Create Python setup script (python/setup.py):
+
+
+from setuptools import setup, find_packages
+
+setup(
+    name='ocr_bridge',
+    version='1.0.0',
+    packages=find_packages(),
+    install_requires=[
+        'numpy>=1.21.0',
+        'onnxruntime>=1.8.0',
+        'Pillow>=8.0.0',
+        'onnxtr'
+    ],
+)
+
+-----------------------------
+
+Create requirements.txt (python/requirements.txt):
+
+numpy>=1.21.0
+onnxruntime>=1.8.0
+Pillow>=8.0.0
+git+https://github.com/felixdittrich92/OnnxTR.git
+---------------------------
+Create the Dart models (lib/models/ocr_result.dart):
+
+import 'package:json_annotation/json_annotation.dart';
+
+part 'ocr_result.g.dart';
+
+@JsonSerializable()
+class OCRResult {
+  final String text;
+  final double confidence;
+  final List<List<double>> box;
+
+  OCRResult({
+    required this.text,
+    required this.confidence,
+    required this.box,
+  });
+
+  factory OCRResult.fromJson(Map<String, dynamic> json) => 
+      _$OCRResultFromJson(json);
+  
+  Map<String, dynamic> toJson() => _$OCRResultToJson(this);
+}
+
+@JsonSerializable()
+class OCRResponse {
+  final String status;
+  final String? message;
+  final List<OCRResult>? results;
+
+  OCRResponse({
+    required this.status,
+    this.message,
+    this.results,
+  });
+
+  factory OCRResponse.fromJson(Map<String, dynamic> json) => 
+      _$OCRResponseFromJson(json);
+  
+  Map<String, dynamic> toJson() => _$OCRResponseToJson(this);
+}
+
+-------
+Create the FFI bridge (lib/native/bridge/ffi_bridge.dart):
+
+import 'dart:ffi' as ffi;
+import 'dart:io' show Platform, Directory;
+import 'package:path/path.dart' as path;
+import 'dart:convert';
+import 'dart:isolate';
+
+// FFI typedefs
+typedef ProcessImageFunc = ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>);
+typedef ProcessImage = ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>);
+
+class FFIBridge {
+  static const String _libName = 'ocr_bridge';
+  late ffi.DynamicLibrary _lib;
+  late ProcessImage _processImage;
+
+  FFIBridge() {
+    _initializeLibrary();
+  }
+
+  void _initializeLibrary() {
+    final libraryPath = _resolveLibraryPath();
+    _lib = ffi.DynamicLibrary.open(libraryPath);
+    _processImage = _lib
+        .lookupFunction<ProcessImageFunc, ProcessImage>('process_image');
+  }
+
+  String _resolveLibraryPath() {
+    if (Platform.isAndroid) {
+      return 'libocr_bridge.so';
+    } else if (Platform.isIOS) {
+      return 'ocr_bridge.framework/ocr_bridge';
+    } else if (Platform.isWindows) {
+      return 'ocr_bridge.dll';
+    } else if (Platform.isMacOS) {
+      return 'libocr_bridge.dylib';
+    } else {
+      return 'libocr_bridge.so';
+    }
+  }
+
+  Future<Map<String, dynamic>> processImage(String imagePath) async {
+    try {
+      final result = await Isolate.run(() {
+        final pathPointer = imagePath.toNativeUtf8();
+        final resultPointer = _processImage(pathPointer);
+        final result = resultPointer.toDartString();
+        return json.decode(result);
+      });
+      return result;
+    } catch (e) {
+      return {
+        'status': 'error',
+        'message': e.toString(),
+      };
+    }
+  }
+}
+
+--------------------------
+
+Create OCR Service (lib/services/ocr_service.dart):
+
+
+import 'dart:async';
+import 'package:path/path.dart' as path;
+import '../native/bridge/ffi_bridge.dart';
+import '../models/ocr_result.dart';
+
+class OCRService {
+  final FFIBridge _bridge;
+  bool _initialized = false;
+
+  OCRService() : _bridge = FFIBridge();
+
+  Future<void> initialize() async {
+    if (!_initialized) {
+      // Any initialization logic needed
+      _initialized = true;
+    }
+  }
+
+  Future<OCRResponse> processImage(String imagePath) async {
+    if (!_initialized) {
+      await initialize();
+    }
+
+    try {
+      final result = await _bridge.processImage(imagePath);
+      return OCRResponse.fromJson(result);
+    } catch (e) {
+      return OCRResponse(
+        status: 'error',
+        message: 'Failed to process image: $e',
+      );
+    }
+  }
+}
+
+
+-------
+
+Create Image Service (lib/services/image_service.dart):
+
+
+import 'dart:io';
+import 'package:image_picker/image_picker.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:path/path.dart' as path;
+
+class ImageService {
+  final ImagePicker _picker = ImagePicker();
+
+  Future<String?> pickImage({bool fromCamera = false}) async {
+    try {
+      final XFile? image = await _picker.pickImage(
+        source: fromCamera ? ImageSource.camera : ImageSource.gallery,
+      );
+
+      if (image == null) return null;
+
+      // Copy to app directory for processing
+      final appDir = await getApplicationDocumentsDirectory();
+      final fileName = path.basename(image.path);
+      final savedImage = await File(image.path)
+          .copy('${appDir.path}/$fileName');
+
+      return savedImage.path;
+    } catch (e) {
+      print('Error picking image: $e');
+      return null;
+    }
+  }
+}
+
+
+-----
+
+Create Scanner Screen (lib/screens/scanner_screen.dart):
+
+import 'package:flutter/material.dart';
+import '../services/ocr_service.dart';
+import '../services/image_service.dart';
+import '../models/ocr_result.dart';
+
+class ScannerScreen extends StatefulWidget {
+  @override
+  _ScannerScreenState createState() => _ScannerScreenState();
+}
+
+class _ScannerScreenState extends State<ScannerScreen> {
+  final OCRService _ocrService = OCRService();
+  final ImageService _imageService = ImageService();
+  
+  bool _processing = false;
+  OCRResponse? _lastResult;
+
+  Future<void> _processImage({bool fromCamera = false}) async {
+    setState(() => _processing = true);
+
+    try {
+      final imagePath = await _imageService.pickImage(fromCamera: fromCamera);
+      if (imagePath != null) {
+        final result = await _ocrService.processImage(imagePath);
+        setState(() => _lastResult = result);
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error: $e')),
+      );
+    } finally {
+      setState(() => _processing = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('Document Scanner'),
+      ),
+      body: Stack(
+        children: [
+          Column(
+            children: [
+              if (_lastResult?.results != null)
+                Expanded(
+                  child: ListView.builder(
+                    itemCount: _lastResult!.results!.length,
+                    itemBuilder: (context, index) {
+                      final result = _lastResult!.results![index];
+                      return ListTile(
+                        title: Text(result.text),
+                        subtitle: Text('Confidence: ${result.confidence}'),
+                      );
+                    },
+                  ),
+                ),
+            ],
+          ),
+          if (_processing)
+            Container(
+              color: Colors.black54,
+              child: Center(
+                child: CircularProgressIndicator(),
+              ),
+            ),
+        ],
+      ),
+      floatingActionButton: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          FloatingActionButton(
+            onPressed: () => _processImage(fromCamera: true),
+            child: Icon(Icons.camera_alt),
+          ),
+          SizedBox(width: 16),
+          FloatingActionButton(
+            onPressed: () => _processImage(),
+            child: Icon(Icons.photo_library),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+
+-----------------------
+
+Create platform-specific build scripts. First, for Android (scripts/build_android.sh):
+
+
+#!/bin/bash
+set -e
+
+# Build Python package
+cd python
+python3 -m pip install -r requirements.txt
+python3 setup.py build
+
+# Copy library to Android project
+cp build/lib*/ocr_bridge*.so ../android/app/src/main/jniLibs/
