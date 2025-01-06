@@ -1,1 +1,43 @@
-https://kvdb.io/VuKUzo8aFSpoWpyXKpFxxH/1735902270721
+
+{
+  "query": {
+    "regexp": {
+      "message": "call to model \\[.*\\] for requestID \\[.*\\] completed"
+    }
+  },
+  "aggs": {
+    "model_counts": {
+      "terms": {
+        "field": "message",
+        "script": {
+          "source": """
+          def matcher = /call to model \[(.*?)\]/.matcher(doc['message'].value);
+          if (matcher.find()) {
+            return matcher.group(1).trim();
+          }
+          return '';
+          """
+        },
+        "size": 10
+      }
+    }
+  }
+}
+
+// Sample Response:
+{
+  "aggregations": {
+    "model_counts": {
+      "buckets": [
+        {
+          "key": "model1",
+          "doc_count": 150
+        },
+        {
+          "key": "model2",
+          "doc_count": 75
+        }
+      ]
+    }
+  }
+}
