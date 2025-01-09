@@ -1,55 +1,4 @@
-
-name: Flutter Android and iOS Build
-
-on:
-  push:
-    branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
-
-jobs:
-  android:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      - name: Set up Java
-        uses: actions/setup-java@v3
-        with:
-          distribution: 'zulu'
-          java-version: '17'
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-      - name: Setup Gradle
-        uses: gradle/gradle-build-action@v2
-      - name: Set up Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          flutter-version: '3.27.1'
-          channel: 'stable'
-          cache: true
-      - name: Create local.properties
-        run: |
-          echo "sdk.dir=$ANDROID_SDK_ROOT" > android/local.properties
-          echo "flutter.sdk=$FLUTTER_HOME" >> android/local.properties
-      - name: Make Gradlew Executable
-        run: chmod +x android/gradlew
-      - name: Ensure AndroidX is enabled
-        run: |
-          echo "android.useAndroidX=true" >> android/gradle.properties
-          echo "android.enableJetifier=true" >> android/gradle.properties
-      - name: Get dependencies
-        run: flutter pub get
-      - name: Clean Gradle
-        run: cd android && ./gradlew clean
-      - name: Build APK
-        run: flutter build apk --release
-      - name: Upload APK
-        uses: actions/upload-artifact@v3
-        with:
-          name: release-apk
-          path: build/app/outputs/flutter-apk/app-release.apk
-
-  ios:
+ios:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v3
@@ -65,54 +14,15 @@ jobs:
         run: |
           cd ios
           pod install
-      - name: Build iOS
+      - name: Build iOS for Simulator
         run: |
-          flutter build ios --release --no-codesign
-      - name: Upload IPA
+          flutter clean
+          flutter build ios --debug --simulator
+          # Create proper simulator archive
+          cd build/ios/iphonesimulator
+          zip -r simulator-build.zip Runner.app/
+      - name: Upload Simulator Build
         uses: actions/upload-artifact@v3
         with:
-          name: release-ipa
-          path: build/ios/iphoneos/Runner.app
-
-{
-  "query": {
-    "regexp": {
-      "message": "call to model \\[.*\\] for requestID \\[.*\\] completed"
-    }
-  },
-  "aggs": {
-    "model_counts": {
-      "terms": {
-        "field": "message",
-        "script": {
-          "source": """
-          def matcher = /call to model \[(.*?)\]/.matcher(doc['message'].value);
-          if (matcher.find()) {
-            return matcher.group(1).trim();
-          }
-          return '';
-          """
-        },
-        "size": 10
-      }
-    }
-  }
-}
-
-// Sample Response:
-{
-  "aggregations": {
-    "model_counts": {
-      "buckets": [
-        {
-          "key": "model1",
-          "doc_count": 150
-        },
-        {
-          "key": "model2",
-          "doc_count": 75
-        }
-      ]
-    }
-  }
-}
+          name: ios-simulator-build
+          path: build/ios/iphonesimulator/simulator-build.zip
