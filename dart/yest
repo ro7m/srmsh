@@ -1,28 +1,42 @@
-ios:
+name: Flutter iOS Build for BrowserStack
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  ios:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v3
+      
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.27.1'
           channel: 'stable'
           cache: true
+          
       - name: Get dependencies
         run: flutter pub get
+        
       - name: Install Pods
         run: |
           cd ios
           pod install
-      - name: Build iOS for Simulator
+          
+      - name: Build iOS for BrowserStack
         run: |
-          flutter clean
-          flutter build ios --debug --simulator
-          # Create proper simulator archive
-          cd build/ios/iphonesimulator
-          zip -r simulator-build.zip Runner.app/
-      - name: Upload Simulator Build
+          flutter build ios --release --no-codesign
+          cd build/ios/iphoneos
+          mkdir Payload
+          cp -r Runner.app Payload
+          zip -r app.ipa Payload
+          
+      - name: Upload IPA
         uses: actions/upload-artifact@v3
         with:
-          name: ios-simulator-build
-          path: build/ios/iphonesimulator/simulator-build.zip
+          name: browserstack-ipa
+          path: build/ios/iphoneos/app.ipa
