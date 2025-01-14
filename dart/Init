@@ -1,26 +1,86 @@
-import javax.net.ssl.*
-import java.security.cert.X509Certificate
+import 'package:flutter/material.dart';
+import 'package:camera/camera.dart';
+import 'screens/camera_screen.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:flutter/services.dart';
+import 'dart:io';
+import 'dart:convert';
 
-allprojects {
-    def trustAll = new X509TrustManager() {
-        @Override
-        X509Certificate[] getAcceptedIssuers() { return null }
-        @Override
-        void checkClientTrusted(X509Certificate[] certs, String authType) {}
-        @Override
-        void checkServerTrusted(X509Certificate[] certs, String authType) {}
+Future<bool> isSimulator() async {
+  if (!Platform.isIOS) return false;
+  
+  try {
+    final String result = await const MethodChannel('flutter_device_type')
+        .invokeMethod('isRealDevice');
+    return result != "true";
+  } on PlatformException catch (_) {
+    return false;
+  }
+}
+
+Future<void> main() async {
+  try {
+    WidgetsFlutterBinding.ensureInitialized();
+    
+    // Check if running on simulator
+    final bool isSimulatorDevice = await isSimulator();
+    
+    if (isSimulatorDevice) {
+      // For simulator, create a mock camera list with one camera
+      final mockCamera = CameraDescription(
+        name: 'Mock Camera',
+        lensDirection: CameraLensDirection.back,
+        sensorOrientation: 0,
+      );
+      runApp(MyApp(cameras: [mockCamera]));
+      return;
     }
 
-    def noopHostVerifier = new HostnameVerifier() {
-        @Override
-        boolean verify(String hostname, SSLSession session) { return true }
+    // For real devices, get actual cameras
+    final cameras = await availableCameras();
+
+    if (cameras.isEmpty) {
+      print('No cameras found');
+      runApp(const MyAppError(error: 'No cameras available'));
+    } else {
+      runApp(MyApp(cameras: cameras));
     }
+  } catch (e) {
+    print('Error initializing app: $e');
+    runApp(MyAppError(error: e.toString()));
+  }
+}
 
-    SSLContext sc = SSLContext.getInstance("TLS")
-    sc.init(null, [trustAll] as TrustManager[], new java.security.SecureRandom())
-    HttpsURLConnection.setDefaultSSLSocketFactory(sc.getSocketFactory())
-    HttpsURLConnection.setDefaultHostnameVerifier(noopHostVerifier)
+class MyApp extends StatelessWidget {
+  final List<CameraDescription> cameras;
+  
+  const MyApp({Key? key, required this.cameras}) : super(key: key);
 
-    // Log to confirm the script is applied
-    println "SSL validation is disabled for all HTTPS connections."
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'Flutter OCR App',
+      theme: ThemeData(
+        primarySwatch: Colors.blue,
+      ),
+      home: CameraScreen(cameras: cameras),
+    );
+  }
+}
+
+class MyAppError extends StatelessWidget {
+  final String error;
+
+  const MyAppError({Key? key, required this.error}) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      home: Scaffold(
+        body: Center(
+          child: Text('Error: $error'),
+        ),
+      ),
+    );
+  }
 }
