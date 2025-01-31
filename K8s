@@ -1,1 +1,19 @@
 aws autoscaling describe-auto-scaling-groups --auto-scaling-group-name <asg-name> --query 'AutoScalingGroups[].Tags[]'
+# Get the IAM role ARN used by the nodegroup
+aws eks describe-nodegroup --cluster-name <cluster> --nodegroup-name <nodegroup> --query 'nodegroup.nodeRole'
+
+# Get the ASG name
+aws autoscaling describe-auto-scaling-groups --query "AutoScalingGroups[?contains(Tags[?Key=='eks:cluster-name'].Value, '<cluster-name>')].[AutoScalingGroupName,MinSize,MaxSize,DesiredCapacity]"
+
+aws autoscaling describe-scaling-activities --auto-scaling-group-name <asg-name>
+
+aws ec2 describe-subnets --subnet-ids <subnet-id> --query 'Subnets[*].[SubnetId,AvailableIpAddressCount]'
+
+aws eks update-cluster-config --name <cluster-name> --logging '{"clusterLogging":[{"types":["api","audit","authenticator","controllerManager","scheduler"],"enabled":true}]}'
+
+# Then check CloudWatch Logs
+
+kubectl describe horizontalpodautoscalers.autoscaling
+
+# Also check CloudWatch metrics for ASG
+aws cloudwatch get-metric-statistics --namespace AWS/AutoScaling --metric-name GroupDesiredCapacity
