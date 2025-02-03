@@ -17,3 +17,10 @@ kubectl describe horizontalpodautoscalers.autoscaling
 
 # Also check CloudWatch metrics for ASG
 aws cloudwatch get-metric-statistics --namespace AWS/AutoScaling --metric-name GroupDesiredCapacity
+
+
+aws autoscaling update-auto-scaling-group \
+    --auto-scaling-group-name your-asg-name \
+    --min-size 5 \
+    --desired-capacity 5 \
+    --max-size 9
