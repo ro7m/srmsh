@@ -102,6 +102,13 @@ class CameraScreenState extends State<CameraScreen> {
 
   final List<String> _competitors = ['cp1', 'cp2', 'cp3', 'cp4', 'cp5'];
   final List<String> _countries = ['ES', 'FR', 'DE', 'IT', 'NL'];
+  final Map<String, String> _countryCurrency = {
+    'ES': 'EUR',
+    'FR': 'EUR',
+    'DE': 'EUR',
+    'IT': 'EUR',
+    'NL': 'EUR',
+  };
   String? _selectedCompetitor;
   String? _selectedCountry;
 
@@ -205,15 +212,18 @@ class CameraScreenState extends State<CameraScreen> {
     final bytes = await image.readAsBytes();
     final String base64Image = base64Encode(bytes);
 
+    final timestamp = DateTime.now().millisecondsSinceEpoch.toString();
+    final String? currency = _countryCurrency[_selectedCountry];
     final Map<String, dynamic> data = {
       'username': userId,
       'competitor': _selectedCompetitor,
       'country': _selectedCountry,
+      'currency': currency,
       'image': base64Image,
     };
 
-    final response = await http.post(
-      Uri.parse('https://kvdb.io/your-kvdb-key'),
+    final response = await http.put(
+      Uri.parse('https://kvdb.io/NyKpFtJ7v392NS8ibLiofx/$timestamp'),
       headers: {
         'Content-Type': 'application/json',
       },
@@ -225,6 +235,7 @@ class CameraScreenState extends State<CameraScreen> {
         MaterialPageRoute(
           builder: (context) => PreviewScreen(
             image: image,
+            key: timestamp, // Pass the key to the next screen
           ),
         ),
       );
