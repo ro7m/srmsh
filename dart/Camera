@@ -1,0 +1,32 @@
+import 'package:flutter/material.dart';
+import 'package:camera/camera.dart';
+
+class CameraScreen extends StatelessWidget {
+  final List<CameraDescription> cameras;
+
+  const CameraScreen({Key? key, required this.cameras}) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    final String userId = ModalRoute.of(context)?.settings.arguments as String;
+
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('Camera Screen'),
+        actions: [
+          Row(
+            children: [
+              Icon(Icons.person),
+              SizedBox(width: 8),
+              Text(userId),
+              SizedBox(width: 16),
+            ],
+          ),
+        ],
+      ),
+      body: Center(
+        child: Text('Camera functionality goes here'),
+      ),
+    );
+  }
+}
