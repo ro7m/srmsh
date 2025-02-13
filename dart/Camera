@@ -213,11 +213,13 @@ class CameraScreenState extends State<CameraScreen> {
     final timestamp = DateTime.now().millisecondsSinceEpoch.toString();
     final String? currency = _countryCurrency[_selectedCountry];
     final Map<String, dynamic> data = {
-      'username': userId,
+      'uploadedAt': $timestamp,
+      'agent_id': userId,
+      'agent_account_name': 'locutor es 1',
       'competitor': _selectedCompetitor,
-      'country': _selectedCountry,
-      'currency': currency,
-      'image': base64Image,
+      'send_country': _selectedCountry,
+      'send_currency': currency,
+      'base64Image': base64Image
     };
 
     final response = await http.put(
