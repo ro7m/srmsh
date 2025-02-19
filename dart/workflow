@@ -1,398 +1,103 @@
-import 'package:flutter/material.dart';
-import 'package:camera/camera.dart';
-import '../services/ocr_service.dart';
-import '../models/ocr_result.dart';
+name: Flutter Android Build
 
-class PreviewScreen extends StatefulWidget {
-  final XFile image;
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
 
-  const PreviewScreen({Key? key, required this.image}) : super(key: key);
+jobs:
+  android:
+    runs-on: ubuntu-latest
 
-  @override
-  _PreviewScreenState createState() => _PreviewScreenState();
-}
+    steps:
+      - uses: actions/checkout@v3
 
-class _PreviewScreenState extends State<PreviewScreen> {
-  final OCRService _ocrService = OCRService();
-  List<OCRResult> _results = [];
-  bool _isProcessing = true;
-  String _errorMessage = '';
+      - name: Set up Java
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'zulu'
+          java-version: '17'
 
-  @override
-  void initState() {
-    super.initState();
-    _processImage();
-  }
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
 
-  Future<void> _processImage() async {
-    try {
-      await _ocrService.loadModels();
-      final results = await _ocrService.processImage(widget.image);
-      setState(() {
-        _results = results;
-        _isProcessing = false;
-      });
-    } catch (e) {
-      setState(() {
-        _errorMessage = 'Error processing image: ${e.toString()}';
-        _isProcessing = false;
-      });
-    }
-  }
+      - name: Setup Gradle
+        uses: gradle/gradle-build-action@v2
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Extracted Text'),
-      ),
-      body: _buildBody(),
-    );
-  }
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.27.1'
+          channel: 'stable'
+          cache: true
 
-  Widget _buildBody() {
-    if (_isProcessing) {
-      return const Center(
-        child: CircularProgressIndicator(),
-      );
-    }
+      # Decode Keystore with simplified secrets
+      - name: Decode Keystore
+        run: |
+          echo "${{ secrets.KEYSTORE_BASE64 }}" > keystore.b64
+          base64 -d keystore.b64 > android/app/upload-keystore.jks
 
-    if (_errorMessage.isNotEmpty) {
-      return Center(
-        child: Text(_errorMessage, style: const TextStyle(color: Colors.red)),
-      );
-    }
+      # Create key.properties with same password for both
+      - name: Create key.properties
+        run: |
+          echo "storeFile=upload-keystore.jks" > android/key.properties
+          echo "storePassword=${{ secrets.KEYSTORE_PASSWORD }}" >> android/key.properties
+          echo "keyPassword=${{ secrets.KEYSTORE_PASSWORD }}" >> android/key.properties
+          echo "keyAlias=${{ secrets.KEY_ALIAS }}" >> android/key.properties
 
-    if (_results.isEmpty) {
-      return const Center(
-        child: Text('No text detected'),
-      );
-    }
+      - name: Create local.properties
+        run: |
+          echo "sdk.dir=$ANDROID_SDK_ROOT" > android/local.properties
+          echo "flutter.sdk=$FLUTTER_HOME" >> android/local.properties
 
-    return ListView.builder(
-      padding: const EdgeInsets.all(16.0),
-      itemCount: _results.length,
-      itemBuilder: (context, index) {
-        final result = _results[index];
-        return Card(
-          child: Padding(
-            padding: const EdgeInsets.all(8.0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  result.text,
-                  style: const TextStyle(fontSize: 16.0),
-                ),
-                const SizedBox(height: 4.0),
-                Text(
-                  'Confidence: ${(result.confidence * 100).toStringAsFixed(1)}%',
-                  style: TextStyle(
-                    fontSize: 12.0,
-                    color: Colors.grey[600],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-}
+      - name: Make Gradlew Executable
+        run: chmod +x android/gradlew
 
----
-import 'dart:typed_data';
-import 'dart:math' as math;
-import 'package:onnxruntime/onnxruntime.dart';
+      - name: Ensure AndroidX is enabled
+        run: |
+          echo "android.useAndroidX=true" >> android/gradle.properties
+          echo "android.enableJetifier=true" >> android/gradle.properties
 
-class TextRecognizer {
-  final OrtSession recognitionModel;
-  static const List<double> REC_MEAN = [0.694, 0.695, 0.693];
-  static const List<double> REC_STD = [0.299, 0.296, 0.301];
-  static const String VOCAB = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~°£€¥¢฿àâéèêëîïôùûüçÀÂÉÈÊËÎÏÔÙÛÜÇ";
+      - name: Get dependencies
+        run: flutter pub get
 
-  TextRecognizer(this.recognitionModel);
+      - name: Clean Gradle
+        run: cd android && ./gradlew clean
 
-  Future<List<String>> recognizeText(Map<String, dynamic> preprocessedData) async {
-    final inputTensor = OrtValueTensor.createTensorWithDataList(
-      preprocessedData['data'] as Float32List,
-      preprocessedData['dims'] as List<int>
-    );
-    
-    final inputs = {'input': inputTensor};
-    final runOptions = OrtRunOptions();
+      - name: Build APK
+        run: flutter build apk --release
 
-    try {
-      final results = await recognitionModel.runAsync(runOptions, inputs);
-      if (results == null || results.isEmpty) {
-        throw Exception('Recognition model output is null');
-      }
-
-      final output = results.first?.value;
-      if (output == null) {
-        throw Exception('Recognition model output is null');
-      }
-
-      // Get dimensions from model output
-      final dimensions = results.first!.tensorData.dimensions;
-      final [batchSize, height, numClasses] = dimensions;
-
-      // Convert output to logits
-      final logits = _flattenNestedList(output as List);
-      
-      // Process each batch item
-      final List<String> decodedTexts = [];
-      for (int b = 0; b < batchSize; b++) {
-        final batchLogits = _extractBatchLogits(logits, b, height, numClasses);
-        final text = _decodeLogits(batchLogits, height, numClasses);
-        decodedTexts.add(text);
-      }
-
-      return decodedTexts;
-    } finally {
-      inputTensor.release();
-      runOptions.release();
-      results?.forEach((element) => element?.release());
-    }
-  }
-
-  List<double> _extractBatchLogits(List<double> logits, int batchIndex, int height, int numClasses) {
-    final batchLogits = <double>[];
-    final batchOffset = batchIndex * height * numClasses;
-    
-    for (int h = 0; h < height; h++) {
-      final startIdx = batchOffset + (h * numClasses);
-      final endIdx = startIdx + numClasses;
-      batchLogits.addAll(logits.sublist(startIdx, endIdx));
-    }
-    
-    return batchLogits;
-  }
-
-  String _decodeLogits(List<double> logits, int height, int numClasses) {
-    final StringBuffer decodedText = StringBuffer();
-    int prevIndex = -1;
-
-    for (int h = 0; h < height; h++) {
-      final List<double> timestepLogits = logits.sublist(h * numClasses, (h + 1) * numClasses);
-      final softmaxed = _softmax(timestepLogits);
-      final maxIndex = softmaxed.indexOf(softmaxed.reduce(math.max));
-      
-      // CTC decoding logic - skip blank token (last class) and repeated characters
-      if (maxIndex != numClasses - 1 && maxIndex != prevIndex) {
-        if (maxIndex < VOCAB.length) {
-          decodedText.write(VOCAB[maxIndex]);
-        }
-      }
-      prevIndex = maxIndex;
-    }
-
-    return decodedText.toString();
-  }
-
-  List<double> _softmax(List<double> logits) {
-    // Numerical stability by subtracting max
-    final maxLogit = logits.reduce(math.max);
-    final expLogits = logits.map((x) => math.exp(x - maxLogit)).toList();
-    final sumExp = expLogits.reduce((a, b) => a + b);
-    return expLogits.map((x) => x / sumExp).toList();
-  }
-
-  Float32List _flattenNestedList(List nestedList) {
-    final List<double> flattened = [];
-    void flatten(dynamic item) {
-      if (item is List) {
-        for (var subItem in item) {
-          flatten(subItem);
-        }
-      } else if (item is num) {
-        flattened.add(item.toDouble());
-      }
-    }
-    flatten(nestedList);
-    return Float32List.fromList(flattened);
-  }
-}
-
------
-
-import 'dart:ui' as ui;
-import 'dart:typed_data';
-import '../constants.dart';
-
-class ImagePreprocessor {
-  Future<Float32List> preprocessForDetection(ui.Image image) async {
-    final width = OCRConstants.TARGET_SIZE[0];
-    final height = OCRConstants.TARGET_SIZE[1];
-
-    final recorder = ui.PictureRecorder();
-    final canvas = ui.Canvas(recorder);
-
-    // Scale image to target size
-    canvas.drawImageRect(
-      image,
-      ui.Rect.fromLTWH(0, 0, image.width.toDouble(), image.height.toDouble()),
-      ui.Rect.fromLTWH(0, 0, width.toDouble(), height.toDouble()),
-      ui.Paint()
-    );
-
-    final picture = recorder.endRecording();
-    final scaledImage = await picture.toImage(width, height);
-    final byteData = await scaledImage.toByteData(format: ui.ImageByteFormat.rawRgba);
-
-    if (byteData == null) {
-      throw Exception('Failed to get byte data from image');
-    }
-
-    final pixels = byteData.buffer.asUint8List();
-    final Float32List preprocessedData = Float32List(3 * width * height);
-
-    for (int i = 0; i < pixels.length; i += 4) {
-      final int idx = i ~/ 4;
-      preprocessedData[idx] = (pixels[i] / 255.0 - OCRConstants.DET_MEAN[0]) / OCRConstants.DET_STD[0]; // R
-      preprocessedData[idx + width * height] = (pixels[i + 1] / 255.0 - OCRConstants.DET_MEAN[1]) / OCRConstants.DET_STD[1]; // G
-      preprocessedData[idx + 2 * width * height] = (pixels[i + 2] / 255.0 - OCRConstants.DET_MEAN[2]) / OCRConstants.DET_STD[2]; // B
-    }
-
-    return preprocessedData;
-  }
-
-  Future<Map<String, dynamic>> preprocessForRecognition(List<ui.Image> crops) async {
-    final targetHeight = OCRConstants.REC_TARGET_SIZE[0];
-    final targetWidth = OCRConstants.REC_TARGET_SIZE[1];
-    
-    // Process each crop
-    final List<Float32List> processedImages = [];
-    
-    for (final image in crops) {
-      // Calculate resize dimensions while maintaining aspect ratio
-      double resizedWidth, resizedHeight;
-      final aspectRatio = targetWidth / targetHeight;
-
-      if (aspectRatio * image.height > image.width) {
-        resizedHeight = targetHeight.toDouble();
-        resizedWidth = (targetHeight * image.width / image.height).roundToDouble();
-      } else {
-        resizedWidth = targetWidth.toDouble();
-        resizedHeight = (targetWidth * image.height / image.width).roundToDouble();
-      }
-
-      // Create black canvas
-      final recorder = ui.PictureRecorder();
-      final canvas = ui.Canvas(recorder);
-      
-      // Fill with black background
-      canvas.drawRect(
-        ui.Rect.fromLTWH(0, 0, targetWidth.toDouble(), targetHeight.toDouble()),
-        ui.Paint()..color = ui.Color(0xFF000000),
-      );
-
-      // Center the image
-      final xOffset = ((targetWidth - resizedWidth) / 2).roundToDouble();
-      final yOffset = ((targetHeight - resizedHeight) / 2).roundToDouble();
-      
-      // Draw resized image
-      canvas.drawImageRect(
-        image,
-        ui.Rect.fromLTWH(0, 0, image.width.toDouble(), image.height.toDouble()),
-        ui.Rect.fromLTWH(xOffset, yOffset, resizedWidth, resizedHeight),
-        ui.Paint(),
-      );
-
-      final picture = recorder.endRecording();
-      final resizedImage = await picture.toImage(targetWidth, targetHeight);
-      final byteData = await resizedImage.toByteData(format: ui.ImageByteFormat.rawRgba);
-
-      if (byteData == null) {
-        throw Exception('Failed to get byte data from image');
-      }
-
-      final pixels = byteData.buffer.asUint8List();
-      final Float32List processedData = Float32List(3 * targetWidth * targetHeight);
-      
-      // Normalize and separate channels
-      for (int y = 0; y < targetHeight; y++) {
-        for (int x = 0; x < targetWidth; x++) {
-          final pixelIndex = (y * targetWidth + x) * 4;
-          final channelSize = targetHeight * targetWidth;
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
           
-          // RGB normalization using REC_MEAN and REC_STD
-          processedData[y * targetWidth + x] = 
-              (pixels[pixelIndex] / 255.0 - OCRConstants.REC_MEAN[0]) / OCRConstants.REC_STD[0];
-          processedData[channelSize + y * targetWidth + x] = 
-              (pixels[pixelIndex + 1] / 255.0 - OCRConstants.REC_MEAN[1]) / OCRConstants.REC_STD[1];
-          processedData[2 * channelSize + y * targetWidth + x] = 
-              (pixels[pixelIndex + 2] / 255.0 - OCRConstants.REC_MEAN[2]) / OCRConstants.REC_STD[2];
-        }
-      }
-      
-      processedImages.add(processedData);
-    }
-
-    // Combine processed images for batch processing
-    if (processedImages.length > 1) {
-      final combinedLength = 3 * targetHeight * targetWidth * processedImages.length;
-      final combinedData = Float32List(combinedLength);
-      
-      for (int i = 0; i < processedImages.length; i++) {
-        combinedData.setRange(
-          i * processedImages[i].length, 
-          (i + 1) * processedImages[i].length, 
-          processedImages[i]
-        );
-      }
-
-      return {
-        'data': combinedData,
-        'dims': [processedImages.length, 3, targetHeight, targetWidth]
-      };
-    }
-
-    // Single image case
-    return {
-      'data': processedImages[0],
-      'dims': [1, 3, targetHeight, targetWidth]
-    };
-  }
-}
-
-------
-
-// In your OCR service:
-final preprocessor = ImagePreprocessor();
-final crops = // your list of cropped images
-final preprocessed = await preprocessor.preprocessForRecognition(crops);
-
-// Create tensor for recognition model
-final tensor = OrtValueTensor.createTensorWithDataList(
-  preprocessed['data'],
-  preprocessed['dims']
-);
-
-----
-class OCRService {
-  Future<List<OCRResult>> processImage(List<ui.Image> crops) async {
-    final preprocessor = ImagePreprocessor();
-    final recognizer = TextRecognizer(_recognitionModel);
-
-    // Preprocess images
-    final preprocessed = await preprocessor.preprocessForRecognition(crops);
-    
-    // Get text recognition results
-    final List<String> recognizedTexts = await recognizer.recognizeText(preprocessed);
-    
-    // Convert to OCRResults
-    return List.generate(
-      recognizedTexts.length,
-      (i) => OCRResult(
-        text: recognizedTexts[i],
-        confidence: 1.0, // You might want to calculate this from the logits
-        boundingBox: boundingBoxes[i],
-      ),
-    );
-  }
-}
-
-
--------
+  ios:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.27.1'
+          channel: 'stable'
+          cache: true
+      - name: Get dependencies
+        run: flutter pub get
+      - name: Install Pods
+        run: |
+          cd ios
+          pod install
+      - name: Build iOS for devices
+        run: |
+          flutter clean
+          flutter build ios --debug --simulator
+          cd build/ios/iphonesimulator
+          zip -r simulator-build.zip Runner.app/
+      - name: Upload simulator build
+        uses: actions/upload-artifact@v4
+        with:
+          name: iphone-simulator-build
+          path: build/ios/iphonesimulator/simulator-build.zip
