@@ -1,0 +1,132 @@
+import boto3
+from fastapi import FastAPI, HTTPException
+from typing import Optional, Dict
+import duckdb
+import pandas as pd
+from datetime import datetime
+import time
+import logging
+
+app = FastAPI()
+
+class DuckDBManager:
+    def __init__(self, role_arn: str, region: str = 'us-east-1', memory_limit_mb: int = 1000):
+        self.conn = duckdb.connect(database=':memory:')
+        self.role_arn = role_arn
+        self.region = region
+        self.credentials = None
+        self.credentials_expiry = None
+        self._setup_connection(memory_limit_mb)
+        self.metrics = []
+
+    def _refresh_credentials(self):
+        """Fetch or refresh STS temporary credentials"""
+        sts_client = boto3.client('sts')
+        try:
+            response = sts_client.assume_role(
+                RoleArn=self.role_arn,
+                RoleSessionName='DuckDBSession',  # Unique session name
+                DurationSeconds=3600  # 1 hour, adjust as needed
+            )
+            self.credentials = response['Credentials']
+            self.credentials_expiry = self.credentials['Expiration'].timestamp()
+            logging.info("STS credentials refreshed successfully")
+        except Exception as e:
+            logging.error(f"Failed to assume role: {str(e)}")
+            raise
+
+    def _setup_connection(self, memory_limit_mb: int):
+        """Initialize DuckDB with S3 and STS credentials"""
+        self.conn.execute("INSTALL httpfs")
+        self.conn.execute("LOAD httpfs")
+
+        # Initial credential fetch
+        self._refresh_credentials()
+        self._apply_credentials()
+
+        # Performance settings
+        self.conn.execute(f"SET memory_limit='{memory_limit_mb}MB'")
+        self.conn.execute("SET enable_object_cache=true")
+        self.conn.execute("SET experimental_parallel_csv=false")
+
+    def _apply_credentials(self):
+        """Apply STS credentials to DuckDB"""
+        self.conn.execute(f"""
+            SET s3_region='{self.region}';
+            SET s3_access_key_id='{self.credentials["AccessKeyId"]}';
+            SET s3_secret_access_key='{self.credentials["SecretAccessKey"]}';
+            SET s3_session_token='{self.credentials["SessionToken"]}';
+        """)
+
+    def _ensure_valid_credentials(self):
+        """Check and refresh credentials if expired or near expiry"""
+        current_time = time.time()
+        # Refresh 5 minutes before expiry to be safe
+        if not self.credentials or current_time > (self.credentials_expiry - 300):
+            self._refresh_credentials()
+            self._apply_credentials()
+
+    def execute_query(self, query: str, params: Optional[Dict] = None) -> tuple[pd.DataFrame, 'QueryMetrics']:
+        self._ensure_valid_credentials()  # Check credentials before query
+        start_time = time.time()
+
+        try:
+            if params:
+                result = self.conn.execute(query, params).df()
+            else:
+                result = self.conn.execute(query).df()
+
+            query_time = time.time() - start_time
+            metrics = QueryMetrics(
+                query_time=query_time,
+                bytes_scanned=self._estimate_bytes_scanned(query),
+                cache_hit=False
+            )
+
+            self.metrics.append(metrics)
+            if query_time > 0.5:
+                logging.warning(f"Slow query: {query} took {query_time}s")
+            return result, metrics
+
+        except Exception as e:
+            logging.error(f"Query failed: {str(e)}")
+            raise
+
+    def _estimate_bytes_scanned(self, query: str) -> int:
+        try:
+            explain = self.conn.execute(f"EXPLAIN {query}").fetchall()
+            return sum(row[0].count('scan') * 1024 for row in explain)  # Rough estimate
+        except:
+            return 0
+
+@dataclass
+class QueryMetrics:
+    query_time: float
+    bytes_scanned: int
+    cache_hit: bool
+
+# Initialize with your role ARN
+db_manager = DuckDBManager(
+    role_arn='arn:aws:iam::ACCOUNT_ID:role/ROLE_NAME',
+    region='us-east-1'
+)
+
+@app.get("/query", timeout=1)
+async def execute_query(query: str, params: Optional[Dict] = None):
+    try:
+        result, metrics = db_manager.execute_query(query, params)
+        return {
+            "status": "success",
+            "data": result.to_dict(orient='records'),
+            "metrics": {
+                "query_time_ms": round(metrics.query_time * 1000, 2),
+                "bytes_scanned": metrics.bytes_scanned,
+            },
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
