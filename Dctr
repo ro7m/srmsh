@@ -1,0 +1,159 @@
+import json
+import argparse
+from pathlib import Path
+from typing import Dict, List, Any, Union, Optional
+
+# Import docTR libraries
+from doctr.io import DocumentFile
+from doctr.models import ocr_predictor
+
+def setup_ocr(detection_arch: str = "db_resnet50", 
+              recognition_arch: str = "crnn_vgg16_bn", 
+              pretrained: bool = True) -> Any:
+    """
+    Set up the OCR model with specified architectures.
+    
+    Args:
+        detection_arch: Architecture for text detection
+        recognition_arch: Architecture for text recognition
+        pretrained: Whether to use pretrained weights
+        
+    Returns:
+        OCR predictor model
+    """
+    print(f"Loading OCR model with {detection_arch} detector and {recognition_arch} recognizer...")
+    return ocr_predictor(detection_arch, recognition_arch, pretrained=pretrained)
+
+def process_document(file_path: Union[str, Path], 
+                     model: Any) -> Dict[str, Any]:
+    """
+    Process a document file and extract text using OCR.
+    
+    Args:
+        file_path: Path to document file (PDF, image)
+        model: OCR model to use for prediction
+        
+    Returns:
+        Dictionary containing extracted text in a structured format
+    """
+    # Load document
+    doc = DocumentFile.from_pdf(file_path) if str(file_path).lower().endswith('.pdf') else DocumentFile.from_images(file_path)
+    
+    # Run inference
+    result = model(doc)
+    
+    # Process result to JSON
+    return convert_result_to_json(result)
+
+def convert_result_to_json(result: Any) -> Dict[str, Any]:
+    """
+    Convert docTR result to JSON format.
+    
+    Args:
+        result: DocTR prediction result
+        
+    Returns:
+        JSON-compatible dictionary with extracted text
+    """
+    json_output = {
+        "document": {
+            "pages": []
+        }
+    }
+    
+    # Process each page
+    for page_idx, page in enumerate(result.pages):
+        page_data = {
+            "page_num": page_idx + 1,
+            "blocks": []
+        }
+        
+        # Process each block
+        for block_idx, block in enumerate(page.blocks):
+            block_data = {
+                "block_id": block_idx,
+                "lines": []
+            }
+            
+            # Process each line
+            for line_idx, line in enumerate(block.lines):
+                line_data = {
+                    "line_id": line_idx,
+                    "words": []
+                }
+                
+                # Process each word
+                for word_idx, word in enumerate(line.words):
+                    line_data["words"].append({
+                        "word_id": word_idx,
+                        "text": word.value,
+                        "confidence": float(word.confidence),
+                        "geometry": word.geometry
+                    })
+                
+                # Add line text
+                line_text = " ".join(word.value for word in line.words)
+                line_data["text"] = line_text
+                
+                block_data["lines"].append(line_data)
+            
+            # Add block text
+            block_text = " ".join(" ".join(word.value for word in line.words) for line in block.lines)
+            block_data["text"] = block_text
+            
+            page_data["blocks"].append(block_data)
+        
+        # Add full page text
+        page_data["text"] = " ".join(block["text"] for block in page_data["blocks"])
+        
+        json_output["document"]["pages"].append(page_data)
+    
+    # Add full document text
+    json_output["document"]["text"] = " ".join(page["text"] for page in json_output["document"]["pages"])
+    
+    return json_output
+
+def save_json(data: Dict[str, Any], output_path: Optional[Union[str, Path]] = None) -> None:
+    """
+    Save data as JSON file or print to console.
+    
+    Args:
+        data: Data to save as JSON
+        output_path: Path to save JSON file, if None print to console
+    """
+    if output_path:
+        with open(output_path, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        print(f"Results saved to {output_path}")
+    else:
+        print(json.dumps(data, ensure_ascii=False, indent=2))
+
+def main():
+    parser = argparse.ArgumentParser(description="Extract text from documents using docTR and output as JSON")
+    parser.add_argument("input_file", help="Path to input document (PDF or image)")
+    parser.add_argument("--output", "-o", help="Path to output JSON file (default: print to console)")
+    parser.add_argument("--detection", "-d", default="db_resnet50", help="Detection architecture (default: db_resnet50)")
+    parser.add_argument("--recognition", "-r", default="crnn_vgg16_bn", help="Recognition architecture (default: crnn_vgg16_bn)")
+    parser.add_argument("--text-only", "-t", action="store_true", help="Output only text without position/confidence information")
+    
+    args = parser.parse_args()
+    
+    # Setup OCR model
+    model = setup_ocr(args.detection, args.recognition)
+    
+    # Process document
+    result = process_document(args.input_file, model)
+    
+    # If text-only mode is enabled, simplify the output
+    if args.text_only:
+        simplified = {
+            "text": result["document"]["text"],
+            "pages": [{"page_num": page["page_num"], "text": page["text"]} for page in result["document"]["pages"]]
+        }
+        result = simplified
+    
+    # Save or print results
+    save_json(result, args.output)
+
+if __name__ == "__main__":
+    main()
