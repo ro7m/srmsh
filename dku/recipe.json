@@ -1,0 +1,42 @@
+{
+  "inputRoles": [
+    {
+      "name": "input",
+      "label": "Input Dataset",
+      "required": true
+    }
+  ],
+  "outputRoles": [
+    {
+      "name": "output",
+      "label": "Output Dataset",
+      "required": true
+    }
+  ],
+  "params": [
+    {
+      "name": "bucket_name",
+      "label": "S3 Bucket Name",
+      "type": "string",
+      "mandatory": true
+    },
+    {
+      "name": "prefix",
+      "label": "S3 Key Prefix",
+      "type": "string",
+      "mandatory": false
+    },
+    {
+      "name": "file_type",
+      "label": "File Type (image/pdf/all)",
+      "type": "string",
+      "mandatory": true
+    },
+    {
+      "name": "prompt",
+      "label": "Information Extraction Prompt",
+      "type": "text",
+      "mandatory": true
+    }
+  ]
+}
