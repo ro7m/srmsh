@@ -1,0 +1,31 @@
+{
+  "id": "custom-ocr-plugin",
+  "version": "1.0.0",
+  "label": "Custom OCR Plugin",
+  "description": "A plugin to perform OCR on documents and extract user-defined information using LLMs.",
+  "author": "rob",
+  "tags": ["OCR", "LLM", "Dataiku"],
+  "components": [
+    {
+      "id": "ocr-recipe",
+      "type": "RECIPE",
+      "family": "custom",
+      "label": "OCR Recipe",
+      "description": "Perform OCR on documents and extract information.",
+      "inputRoles": [
+        {
+          "name": "input",
+          "label": "Input Dataset",
+          "required": true
+        }
+      ],
+      "outputRoles": [
+        {
+          "name": "output",
+          "label": "Output Dataset",
+          "required": true
+        }
+      ]
+    }
+  ]
+}
