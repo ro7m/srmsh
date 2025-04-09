@@ -1,0 +1,99 @@
+import dataiku
+import pandas as pd
+import numpy as np
+from typing import Dict, List, Any
+
+def model_api_endpoint(input_data: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    API endpoint function that loads and uses a Dataiku LightGBM binary classification model
+    
+    Parameters:
+    -----------
+    input_data : Dict[str, Any]
+        Input data for the model in the format:
+        {
+            "features": [
+                {"feature1": value1, "feature2": value2, ...},
+                ...
+            ]
+        }
+        
+    Returns:
+    --------
+    Dict[str, Any]
+        Binary classification results (0 or 1) for each input row
+    """
+    # Get the project handle
+    client = dataiku.api_client()
+    project = client.get_default_project()
+    
+    # Get the saved model
+    model_id = "YOUR_LIGHTGBM_MODEL_ID"  # Replace with your actual model ID
+    saved_model = project.get_saved_model(model_id)
+    
+    # Get the model version (usually you want the active version)
+    model_version = saved_model.get_active_version()
+    
+    # Load the model object
+    model_handler = model_version.get_model_handler()
+    model = model_handler.get_model()
+    
+    # Prepare input data for prediction
+    features_data = input_data.get("features", [])
+    if not features_data:
+        return {"error": "No features provided in input data"}
+    
+    input_df = pd.DataFrame(features_data)
+    
+    # Make predictions
+    try:
+        # Get class predictions (0 or 1)
+        class_predictions = model.predict(input_df)
+        
+        # You can also get probability scores if needed
+        # probability_predictions = model.predict_proba(input_df)
+        
+        # Format the results
+        results = []
+        for i, pred in enumerate(class_predictions):
+            result = {
+                "row_id": i,
+                "prediction_class": int(pred),  # Ensure it's either 0 or 1 as an integer
+                # Uncomment if you want probability scores
+                # "probability_class_1": float(probability_predictions[i][1]) if len(probability_predictions[i]) > 1 else float(probability_predictions[i])
+            }
+            results.append(result)
+        
+        return {
+            "status": "success",
+            "predictions": results,
+            "row_count": len(results)
+        }
+        
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": str(e)
+        }
+
+# Example function to test the endpoint with sample data (not executed in API Designer)
+def test_endpoint():
+    sample_input = {
+        "features": [
+            {"feature1": 0.5, "feature2": 25, "feature3": "category_a"},
+            {"feature1": 0.8, "feature2": 30, "feature3": "category_b"}
+        ]
+    }
+    
+    result = model_api_endpoint(sample_input)
+    print(result)
+    
+    # Expected output format:
+    # {
+    #     "status": "success",
+    #     "predictions": [
+    #         {"row_id": 0, "prediction_class": 1},
+    #         {"row_id": 1, "prediction_class": 0}
+    #     ],
+    #     "row_count": 2
+    # }
