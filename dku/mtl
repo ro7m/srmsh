@@ -25,7 +25,7 @@ sys.path.append(model_zip_folder)
 model = dataikuscoring.load_model(f"{model_zip_folder}/weights.zip")
 
 config = {
-     'role_arn': 'arn:aws:iam::975050017269:role/SL-ROL-DKU-UAT-NV-DSS',
+     'role_arn': 'arn:aws:iam::xxxx:role/role',
      'region': 'us-east-1',
      'bucket': 'mybuk',
      'projectkey':'myMODEL',
