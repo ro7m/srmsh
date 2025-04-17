@@ -1,0 +1,31 @@
+def execute_in_thread(fetch_functions: List[Tuple], request_id: str) -> List[Optional[pd.DataFrame]]:
+    """Execute multiple functions in parallel threads with proper error handling."""
+    logger.info(f"[{request_id}] Starting parallel execution of {len(fetch_functions)} functions")
+    
+    results = [None] * len(fetch_functions)
+    future_to_index = {}
+    
+    try:
+        # Submit all tasks to the thread pool
+        for index, (func, lookup_condition, s3folder, projectkey, bucket) in enumerate(fetch_functions):
+            logger.debug(f"[{request_id}] Submitting task {index} to thread pool")
+            future = thread_pool.submit(func, lookup_condition, s3folder, projectkey, bucket)
+            future_to_index[future] = index
+        
+        # Process completed futures as they finish
+        for future in as_completed(future_to_index.keys(), timeout=10):
+            index = future_to_index[future]
+            try:
+                results[index] = future.result()
+                logger.info(f"[{request_id}] Task {index} completed successfully")
+            except Exception as e:
+                logger.error(f"[{request_id}] Task {index} failed with error: {str(e)}")
+                results[index] = None
+        
+        return results
+    except TimeoutError:
+        logger.error(f"[{request_id}] Timed out waiting for tasks to complete")
+        return results
+    except Exception as e:
+        logger.error(f"[{request_id}] Fatal error in thread execution: {str(e)}")
+        return results
