@@ -1,31 +1,189 @@
-from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-import os
-import base64
-import struct
+import dku
+import pandas as pd
+import logging
+import api_client
+import os, sys
+import requests
+from typing import Optional, Dict
+import duckdb
+from datetime import datetime,timezone
+import time
 
-def encrypt_image(image_data, key):
-    # Generate a random 96-bit IV/nonce (12 bytes)
-    nonce = os.urandom(12)
-    
-    # Create an AESGCM instance with your key
-    aesgcm = AESGCM(key)
-    
-    # Encrypt the data
-    encrypted_data = aesgcm.encrypt(nonce, image_data, None)
-    
-    # Format: nonce (12 bytes) + encrypted data
-    return nonce + encrypted_data
 
-def decrypt_image(combined_data, key):
-    # Extract nonce (first 12 bytes)
-    nonce = combined_data[:12]
-    # Extract encrypted data (remaining bytes)
-    encrypted_data = combined_data[12:]
+config = {
+    'role_arn': 'arn:aws:iam::XXXXX:role/this_is_my_role',
+    'region': 'us-east-1',
+    'bucket': 'my_bucket',
+    'projectkey':'myprojectkey',
+    's3folder': 's3folder',
+    'num_partitionskey1': 5,
+    'lookupkey1':'lookupkey1',
+    'lookupkey2':'lookupkey2',
+    'lookupkey3':'lookupkey3',
+    'lookupkey4':'lookupkey4',
+    'lookupkey5':'lookupkey5'
+}
+
+folder_path = folders[0]
+
+sys.path.append(folder_path)
+
+class STSManager:
+    def __init__(self, role_arn: str, region: str = 'us-east-1', session_name: str = 'DuckDBSession'):
+        self.role_arn = role_arn
+        self.region = region
+        self.session_name = session_name
+        self.credentials = None
+        self.expiration = None
     
-    # Create an AESGCM instance with your key
-    aesgcm = AESGCM(key)
+    def get_credentials(self):
+        if self._should_refresh(): 
+            client = dku.client("http://abc.com:8800","take_my_key")
+            project_key = config['projectkey']
+            runnable_type="pyrunnable_testrole_rolefetcher"
+            project=DSSProject(client,project_key)
+            macro=project.get_macro(runnable_type)
+            run_id= macro.run(wait=True)
+            self.credentials = macro.get_result(run_id,as_type='json')
+            self.expiration = self.credentials['expiration']
+
+        return {
+            'aws_access_key_id': self.credentials['aws_access_key_id'],
+            'aws_secret_access_key': self.credentials['aws_secret_access_key'],
+            'aws_session_token': self.credentials['aws_session_token'],
+            'expiration': self.credentials['expiration']
+        }
     
-    # Decrypt the data
-    decrypted_data = aesgcm.decrypt(nonce, encrypted_data, None)
+    def _should_refresh(self):
+        if not self.credentials :
+            print("from if",self.credentials)
+            return True
+        now = datetime.now(timezone.utc).isoformat()
+
+        time_remaining = datetime.fromisoformat(self.expiration) - datetime.fromisoformat(now)
+        return time_remaining.total_seconds() < 60  # Refresh if less than 1 minutes remaining
+
+
+class DuckDBManager:
+    def __init__(self, role_arn: str, region: str = 'us-east-1', cache_size_mb: int = 200):
+        self.conn = duckdb.connect(database=':memory:')
+        self.sts_manager = STSManager(role_arn, region)
+        self._setup_connection(cache_size_mb)
+        
+    def _setup_connection(self, cache_size_mb: int):
+        self.conn.install_extension(f"{folder_path}/httpfs.duckdb_extension")
+        self.conn.execute("LOAD httpfs")
+        self.conn.execute(f"SET memory_limit='{cache_size_mb}MB'")
+        self.conn.execute("SET enable_object_cache=true")
+        self._update_credentials()
     
-    return decrypted_data
+    def _update_credentials(self):
+        credentials = self.sts_manager.get_credentials()        
+        self.conn.execute(f"SET s3_region='{self.sts_manager.region}'")
+        self.conn.execute(f"SET s3_access_key_id='{credentials['aws_access_key_id']}'")
+        self.conn.execute(f"SET s3_secret_access_key='{credentials['aws_secret_access_key']}'")
+        self.conn.execute(f"SET s3_session_token='{credentials['aws_session_token']}'")
+        
+    def execute_query(self, query: str, params: Optional[Dict] = None) -> tuple[pd.DataFrame, Dict]:
+        
+        self._update_credentials()
+        
+        start_time = time.time()
+        
+        try:
+            print (f"got query {query} and params {params}")
+            if params:
+                result = self.conn.execute(query, params).df()
+            else:
+                result = self.conn.execute(query).df()
+            
+            query_time = time.time() - start_time
+            
+            metrics = {
+                "query_time_ms": round(query_time * 1000, 2)
+            }
+            
+            return result, metrics
+            
+        except Exception as e:
+            print(f"Query execution failed: {str(e)}")
+            raise
+
+           
+        
+
+# Create the DB manager once at application startup
+db_manager = DuckDBManager(
+    role_arn=config['role_arn'],
+    region=config['region']
+)            
+
+def is_blank(input_string):
+    return not input_string.strip()
+
+def getband(a):
+    if (a >= 3):
+        return "hb"
+    else:
+        return "lb";
+    
+def validate_and_assign_defaults(parameters, config):
+    required_keys = ['lookupkey1', 'lookupkey2', 'lookupkey3', 'lookupkey4']
+    for key in required_keys:
+        if key not in config or config[key] not in parameters:
+            parameters[config[key]] = ""
+
+def predict(namedQuery, parameters):
+    start_time = time.time()
+    print("recieved request --> ", parameters)
+    try:
+        band = getband(float(parameters[config['lookupkey5']]))
+    except Exception as e:  
+        print('exception:', str(e))
+        band = "NA"
+    validate_and_assign_defaults(parameters, config)
+    out = lkp_query(parameters[config['lookupkey1']],parameters[config['lookupkey2']],
+                     parameters[config['lookupkey3']], parameters[config['lookupkey4']],
+                    band)
+    query_time = time.time() - start_time
+    print("total_time to serve the request ",round(query_time * 1000, 2))
+    return out
+
+def execute_query(query: str, params: Optional[Dict] = None):
+    try:
+        result, metrics = db_manager.execute_query(query, params)
+        
+        records = result.to_dict(orient='records')
+        print('metrics', metrics)
+        
+        if records:
+            result = records[0]
+            return {k:v for k,v in result.items()}
+        else:
+            return {k: 'na' for k, v in result.items()}
+        
+
+    except Exception as e:
+        print(str(e))
+        raise              
+            
+def lkp_query(lookupkey1 = "000000",lookupkey2 = "000000", lookupkey3 = "NA", lookupkey4 = "NA", band = '000000' ):
+    
+    bucket = config['bucket']
+    projectkey = config['projectkey']
+    s3folder = config['s3folder']
+    if is_blank(lookupkey1):
+        lookupkey1 = 0
+    partition_number_key1 =  int(lookupkey1) % config['num_partitionskey1']
+    query = f"""
+    SELECT *
+    FROM read_csv_auto('s3://{bucket}/xxx/{projectkey}/{s3folder}/{partition_number_key1}.0/*.csv',delim = ',',
+    header = true) 
+    WHERE tg='{lookupkey1}' and
+    rc='{lookupkey2}' and
+    cid='{lookupkey3}' and
+    ct='{lookupkey4}' and
+    b = '{band}'
+    LIMIT 1
+    """
+    return execute_query(query)            
