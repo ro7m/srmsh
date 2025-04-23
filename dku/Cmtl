@@ -9,8 +9,17 @@ class TokenManager:
         self.client_secret = client_secret
         self.buffer_seconds = buffer_seconds
         self.access_token = None
-        self.expiry_time = None
-        self._timer = None
+        self.expiry_time = 0
+        self._stop_event = threading.Event()
+        self._thread = None
+
+    def _refresh_loop(self):
+        while not self._stop_event.is_set():
+            self._fetch_token()
+
+            sleep_time = max(5, self.expiry_time - time.time() - self.buffer_seconds)
+            if self._stop_event.wait(timeout=sleep_time):
+                break
 
     def _fetch_token(self):
         response = requests.post(self.auth_url, json={
@@ -19,27 +28,19 @@ class TokenManager:
         })
         data = response.json()
         self.access_token = data['access_token']
-        expires_in = data['expires_in']  # typically in seconds
+        expires_in = data['expires_in']
         self.expiry_time = time.time() + expires_in
 
         print(f"New token: {self.access_token} (valid for {expires_in} seconds)")
 
-        # Schedule next refresh
-        self._schedule_refresh(expires_in)
-
-    def _schedule_refresh(self, expires_in):
-        refresh_in = max(0, expires_in - self.buffer_seconds)
-        if self._timer:
-            self._timer.cancel()
-        self._timer = threading.Timer(refresh_in, self._fetch_token)
-        self._timer.start()
-
     def start(self):
-        self._fetch_token()
+        self._thread = threading.Thread(target=self._refresh_loop, daemon=True)
+        self._thread.start()
 
     def stop(self):
-        if self._timer:
-            self._timer.cancel()
+        self._stop_event.set()
+        if self._thread:
+            self._thread.join()
 
     def get_token(self):
         return self.access_token
@@ -53,9 +54,8 @@ if __name__ == "__main__":
     )
     tm.start()
 
-    try:
-        while True:
-            print(f"Using token: {tm.get_token()}")
-            time.sleep(10)
-    except KeyboardInterrupt:
-        tm.stop()
+    for _ in range(5):
+        print(f"Using token: {tm.get_token()}")
+        time.sleep(10)
+
+    tm.stop()
