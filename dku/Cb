@@ -1,0 +1,36 @@
+import requests
+import time
+import pybreaker
+
+# Config
+API_URL = "https://example.com/api"
+TIMEOUT = 5  # seconds
+
+# Define the circuit breaker
+circuit_breaker = pybreaker.CircuitBreaker(
+    fail_max=5,              # Max failures before opening the circuit
+    reset_timeout=30         # Time in seconds before trying again
+)
+
+# Wrap the API call in the circuit breaker
+@circuit_breaker
+def call_api():
+    try:
+        response = requests.get(API_URL, timeout=TIMEOUT)
+        response.raise_for_status()
+        print("API call succeeded.")
+        return response.json()
+    except requests.exceptions.Timeout:
+        print("Timeout occurred.")
+        raise  # Let pybreaker count this as a failure
+    except requests.exceptions.RequestException as e:
+        print(f"Request error: {e}")
+        raise
+
+# Call example
+for _ in range(20):
+    try:
+        result = call_api()
+    except pybreaker.CircuitBreakerError:
+        print("Circuit breaker open. Skipping call.")
+    time.sleep(2)
