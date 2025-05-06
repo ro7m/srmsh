@@ -1,0 +1,75 @@
+import time
+from functools import wraps
+
+class CircuitBreaker:
+    CLOSED = "closed"
+    OPEN = "open"
+    HALF_OPEN = "half-open"
+
+    def __init__(self, failure_threshold, recovery_timeout):
+        self.failure_threshold = failure_threshold
+        self.recovery_timeout = recovery_timeout
+        self.state = self.CLOSED
+        self.failure_count = 0
+        self.last_failure_time = None
+
+    def __call__(self, func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            if self.state == self.CLOSED:
+                try:
+                    result = func(*args, **kwargs)
+                    self.reset()
+                    return result
+                except Exception as e:
+                    self.trip()
+                    raise e
+            elif self.state == self.OPEN:
+                if time.time() - self.last_failure_time > self.recovery_timeout:
+                    self.transition_to_half_open()
+                raise Exception("Service unavailable")
+            elif self.state == self.HALF_OPEN:
+                try:
+                    result = func(*args, **kwargs)
+                    self.reset()
+                    return result
+                except Exception as e:
+                    self.trip()
+                    raise e
+        return wrapper
+
+    def trip(self):
+        self.state = self.OPEN
+        self.failure_count += 1
+        self.last_failure_time = time.time()
+
+    def reset(self):
+        self.state = self.CLOSED
+        self.failure_count = 0
+        self.last_failure_time = None
+
+    def transition_to_half_open(self):
+        self.state = self.HALF_OPEN
+
+# Example usage
+failure_threshold = 3
+recovery_timeout = 10
+
+circuit_breaker = CircuitBreaker(failure_threshold, recovery_timeout)
+
+@circuit_breaker
+def unreliable_service():
+    # Simulate an unreliable service that sometimes fails
+    import random
+    if random.randint(1, 10) <= 3:
+        raise Exception("Service failed")
+    return "Service is successful"
+
+if __name__ == "__main__":
+    for _ in range(5):
+        try:
+            result = unreliable_service()
+            print(result)
+        except Exception as e:
+            print(e)
+        time.sleep(2)
