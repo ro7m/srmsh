@@ -1,0 +1,91 @@
+import requests
+import json
+
+def keep_nested_field(response, nested_field_path):
+    """
+    Extracts and keeps a specific nested field from a JSON response.
+
+    Args:
+        response: A requests.Response object.
+        nested_field_path (str): The path to the nested field, using dot notation
+                                 (e.g., "user.address.city").
+
+    Returns:
+        dict or list or None: A dictionary or list containing the extracted
+                              nested field data, or None if the path is invalid
+                              or the response cannot be decoded as JSON.
+    """
+    try:
+        data = response.json()
+    except json.JSONDecodeError:
+        print("Error: Could not decode the response as JSON.")
+        return None
+
+    path_parts = nested_field_path.split('.')
+
+    def _extract_nested(obj, parts):
+        if not parts:
+            return obj
+        key = parts[0]
+        remaining_parts = parts[1:]
+
+        if isinstance(obj, dict) and key in obj:
+            return _extract_nested(obj[key], remaining_parts)
+        elif isinstance(obj, list):
+            return [_extract_nested(item, parts) for item in obj]
+        else:
+            return None
+
+    extracted_data = _extract_nested(data, path_parts)
+    return {nested_field_path: extracted_data}
+
+
+# Example Usage:
+
+# Sample nested response data
+sample_nested_response_data = {
+    "id": 101,
+    "name": "Alice Smith",
+    "details": {
+        "age": 25,
+        "contact": {
+            "email": "alice.s@example.com",
+            "phone": "123-456-7890"
+        },
+        "occupation": "Analyst"
+    }
+}
+
+class MockResponse:
+    def __init__(self, json_data):
+        self._json_data = json_data
+
+    def json(self):
+        return self._json_data
+
+res_nested = MockResponse(sample_nested_response_data)
+
+# Keep the 'contact' nested field
+nested_field_to_keep = "details.contact"
+filtered_nested = keep_nested_field(res_nested, nested_field_to_keep)
+print(f"Kept nested field '{nested_field_to_keep}':", filtered_nested)
+# Expected Output: Kept nested field 'details.contact': {'details.contact': {'email': 'alice.s@example.com', 'phone': '123-456-7890'}}
+
+# Keep the 'email' nested field
+nested_field_to_keep_deeper = "details.contact.email"
+filtered_nested_deeper = keep_nested_field(res_nested, nested_field_to_keep_deeper)
+print(f"Kept nested field '{nested_field_to_keep_deeper}':", filtered_nested_deeper)
+# Expected Output: Kept nested field 'details.contact.email': {'details.contact.email': 'alice.s@example.com'}
+
+# Example with a list containing nested structures
+sample_list_nested_response_data = [
+    {"id": 1, "product": {"name": "Laptop", "specs": {"ram": "16GB", "storage": "512GB"}}},
+    {"id": 2, "product": {"name": "Mouse", "specs": {"dpi": "1600"}}}
+]
+res_list_nested = MockResponse(sample_list_nested_response_data)
+
+# Keep the 'product.specs' nested field from the list
+nested_field_to_keep_list = "product.specs"
+filtered_list_nested = keep_nested_field(res_list_nested, nested_field_to_keep_list)
+print(f"Kept nested field '{nested_field_to_keep_list}' from list:", filtered_list_nested)
+# Expected Output: Kept nested field 'product.specs' from list: {'product.specs': [{'ram': '16GB', 'storage': '512GB'}, {'dpi': '1600'}]}
