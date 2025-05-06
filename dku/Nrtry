@@ -1,0 +1,18 @@
+from requests.adapters import HTTPAdapter
+
+
+def create_no_retry_session():
+    """Create a requests session with retries disabled"""
+    session = requests.Session()
+    
+    # Create an adapter with max_retries=0 to disable automatic retries
+    adapter = HTTPAdapter(max_retries=0)
+    
+    # Mount this adapter for both http and https
+    session.mount('http://', adapter)
+    session.mount('https://', adapter)
+    
+    return session
+
+# Get a session with retries disabled
+no_retry_session = create_no_retry_session()
