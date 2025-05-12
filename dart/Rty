@@ -1,0 +1,29 @@
+import time
+import random
+import boto3
+from botocore.exceptions import ClientError
+
+bedrock_runtime = boto3.client("bedrock-runtime")
+
+def call_bedrock_with_retry(payload, max_retries=5):
+    delay = 1  # initial delay in seconds
+
+    for attempt in range(1, max_retries + 1):
+        try:
+            response = bedrock_runtime.invoke_model(
+                modelId="your-model-id",
+                contentType="application/json",
+                accept="application/json",
+                body=payload
+            )
+            return response
+
+        except ClientError as e:
+            if e.response['ResponseMetadata']['HTTPStatusCode'] == 429:
+                sleep_time = delay + random.uniform(0, 1)  # jitter
+                print(f"Rate limited. Retry {attempt}/{max_retries} in {sleep_time:.2f}s...")
+                time.sleep(sleep_time)
+                delay *= 2  # exponential backoff
+            else:
+                raise e
+    raise Exception("Max retries exceeded for Bedrock call")
