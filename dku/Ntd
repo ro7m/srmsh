@@ -1,0 +1,20 @@
+def to_nested_json(flat_dict, sep="."):
+    nested = {}
+    for key, value in flat_dict.items():
+        parts = key.split(sep)
+        d = nested
+        for part in parts[:-1]:
+            d = d.setdefault(part, {})
+        d[parts[-1]] = value
+    return nested
+
+# Example usage
+flat_dict = {
+    "user.name": "Alice",
+    "user.age": 30,
+    "user.address.city": "New York",
+    "user.address.zip": "10001"
+}
+
+nested_json = to_nested_json(flat_dict)
+print(nested_json)
