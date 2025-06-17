@@ -1,0 +1,387 @@
+import polars as pl
+import time
+from typing import Optional, List, Dict, Any, Union
+import logging
+from pathlib import Path
+
+class PolarsFastLookup:
+    def __init__(self, parquet_file: str, lazy: bool = True):
+        """
+        Initialize Polars DataFrame for fast lookups
+        
+        Args:
+            parquet_file: Path to parquet file
+            lazy: Use lazy evaluation (recommended for large datasets)
+        """
+        self.logger = logging.getLogger(__name__)
+        self.parquet_file = parquet_file
+        
+        # Load data
+        start_time = time.time()
+        if lazy:
+            self.df = pl.scan_parquet(parquet_file)
+            self.logger.info(f"Lazy-loaded parquet file: {parquet_file}")
+        else:
+            self.df = pl.read_parquet(parquet_file)
+            load_time = time.time() - start_time
+            self.logger.info(f"Loaded {len(self.df)} rows in {load_time:.2f}s")
+        
+        # Store computed DataFrames for reuse
+        self._cached_dfs = {}
+        self._indexes = {}
+    
+    def create_lookup_index(self, key_column: str, cache_name: Optional[str] = None) -> None:
+        """
+        Create an optimized lookup structure for a specific column
+        
+        Args:
+            key_column: Column to create index for
+            cache_name: Name for cached index (defaults to column name)
+        """
+        cache_name = cache_name or f"idx_{key_column}"
+        
+        start_time = time.time()
+        
+        # Create optimized lookup DataFrame
+        if isinstance(self.df, pl.LazyFrame):
+            indexed_df = (
+                self.df
+                .with_row_index("_row_id")  # Add row index for fast access
+                .collect()  # Collect for indexing
+            )
+        else:
+            indexed_df = self.df.with_row_index("_row_id")
+        
+        # Sort by key column for binary search optimization
+        indexed_df = indexed_df.sort(key_column)
+        
+        self._cached_dfs[cache_name] = indexed_df
+        
+        # Create hash map for O(1) lookups
+        self._indexes[cache_name] = {
+            'key_column': key_column,
+            'lookup_map': dict(zip(
+                indexed_df[key_column].to_list(),
+                indexed_df["_row_id"].to_list()
+            ))
+        }
+        
+        index_time = time.time() - start_time
+        self.logger.info(f"Created index for '{key_column}' in {index_time:.2f}s")
+    
+    def get_by_key(self, key_column: str, key_value: Any, 
+                   columns: Optional[List[str]] = None) -> Optional[Dict[str, Any]]:
+        """
+        Fast lookup by key value
+        
+        Args:
+            key_column: Column to search in
+            key_value: Value to search for
+            columns: Specific columns to return (None = all)
+        
+        Returns:
+            Dictionary of column values or None if not found
+        """
+        cache_name = f"idx_{key_column}"
+        
+        # Create index if it doesn't exist
+        if cache_name not in self._indexes:
+            self.create_lookup_index(key_column)
+        
+        # Fast O(1) lookup using hash map
+        lookup_map = self._indexes[cache_name]['lookup_map']
+        if key_value not in lookup_map:
+            return None
+        
+        row_id = lookup_map[key_value]
+        df = self._cached_dfs[cache_name]
+        
+        # Get the specific row
+        result = df.filter(pl.col("_row_id") == row_id)
+        
+        if result.height == 0:
+            return None
+        
+        # Select specific columns if requested
+        if columns:
+            result = result.select(columns)
+        else:
+            result = result.drop("_row_id")  # Remove internal row ID
+        
+        # Convert to dictionary
+        return result.to_dicts()[0]
+    
+    def get_multiple_by_keys(self, key_column: str, key_values: List[Any],
+                            columns: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+        """
+        Batch lookup for multiple keys (more efficient than individual lookups)
+        """
+        if isinstance(self.df, pl.LazyFrame):
+            query_df = self.df
+        else:
+            query_df = self.df.lazy()
+        
+        # Filter for all key values at once
+        result = (
+            query_df
+            .filter(pl.col(key_column).is_in(key_values))
+        )
+        
+        if columns:
+            result = result.select(columns)
+        
+        return result.collect().to_dicts()
+    
+    def query(self, **filters) -> List[Dict[str, Any]]:
+        """
+        General purpose filtering with multiple conditions
+        
+        Args:
+            **filters: Column-value pairs for filtering
+        
+        Returns:
+            List of matching records
+        """
+        if isinstance(self.df, pl.LazyFrame):
+            query_df = self.df
+        else:
+            query_df = self.df.lazy()
+        
+        # Build filter conditions
+        conditions = []
+        for column, value in filters.items():
+            if isinstance(value, list):
+                conditions.append(pl.col(column).is_in(value))
+            elif isinstance(value, tuple) and len(value) == 2:
+                # Range query (min, max)
+                min_val, max_val = value
+                conditions.append(pl.col(column).is_between(min_val, max_val))
+            else:
+                conditions.append(pl.col(column) == value)
+        
+        # Apply all conditions
+        if conditions:
+            for condition in conditions:
+                query_df = query_df.filter(condition)
+        
+        return query_df.collect().to_dicts()
+    
+    def aggregate_query(self, group_by: List[str], 
+                       aggregations: Dict[str, str]) -> List[Dict[str, Any]]:
+        """
+        Perform aggregation queries
+        
+        Args:
+            group_by: Columns to group by
+            aggregations: Dict of {column: agg_function} where agg_function 
+                         can be 'sum', 'mean', 'count', 'min', 'max', etc.
+        
+        Returns:
+            Aggregated results
+        """
+        if isinstance(self.df, pl.LazyFrame):
+            query_df = self.df
+        else:
+            query_df = self.df.lazy()
+        
+        # Build aggregation expressions
+        agg_exprs = []
+        for column, agg_func in aggregations.items():
+            if agg_func == 'count':
+                agg_exprs.append(pl.count(column).alias(f"{column}_{agg_func}"))
+            elif agg_func == 'sum':
+                agg_exprs.append(pl.sum(column).alias(f"{column}_{agg_func}"))
+            elif agg_func == 'mean':
+                agg_exprs.append(pl.mean(column).alias(f"{column}_{agg_func}"))
+            elif agg_func == 'min':
+                agg_exprs.append(pl.min(column).alias(f"{column}_{agg_func}"))
+            elif agg_func == 'max':
+                agg_exprs.append(pl.max(column).alias(f"{column}_{agg_func}"))
+            elif agg_func == 'std':
+                agg_exprs.append(pl.std(column).alias(f"{column}_{agg_func}"))
+        
+        result = query_df.group_by(group_by).agg(agg_exprs)
+        return result.collect().to_dicts()
+    
+    def create_materialized_view(self, view_name: str, 
+                                query_func) -> None:
+        """
+        Create a materialized view (cached query result)
+        
+        Args:
+            view_name: Name for the cached view
+            query_func: Function that takes a LazyFrame and returns a LazyFrame
+        """
+        start_time = time.time()
+        
+        if isinstance(self.df, pl.LazyFrame):
+            base_df = self.df
+        else:
+            base_df = self.df.lazy()
+        
+        # Apply the query function and collect result
+        materialized = query_func(base_df).collect()
+        self._cached_dfs[view_name] = materialized
+        
+        cache_time = time.time() - start_time
+        self.logger.info(f"Materialized view '{view_name}' created in {cache_time:.2f}s")
+    
+    def get_materialized_view(self, view_name: str) -> pl.DataFrame:
+        """Get a cached materialized view"""
+        if view_name not in self._cached_dfs:
+            raise ValueError(f"Materialized view '{view_name}' not found")
+        return self._cached_dfs[view_name]
+    
+    def query_materialized_view(self, view_name: str, **filters) -> List[Dict[str, Any]]:
+        """Query a materialized view with filters"""
+        df = self.get_materialized_view(view_name)
+        
+        # Apply filters
+        for column, value in filters.items():
+            if isinstance(value, list):
+                df = df.filter(pl.col(column).is_in(value))
+            else:
+                df = df.filter(pl.col(column) == value)
+        
+        return df.to_dicts()
+    
+    def get_stats(self) -> Dict[str, Any]:
+        """Get basic statistics about the dataset"""
+        if isinstance(self.df, pl.LazyFrame):
+            df = self.df.collect()
+        else:
+            df = self.df
+        
+        return {
+            'rows': df.height,
+            'columns': df.width,
+            'column_names': df.columns,
+            'memory_usage_mb': df.estimated_size('mb'),
+            'dtypes': dict(zip(df.columns, [str(dtype) for dtype in df.dtypes]))
+        }
+    
+    def top_k_by_column(self, column: str, k: int = 10, 
+                       ascending: bool = False) -> List[Dict[str, Any]]:
+        """Get top K records by column value"""
+        if isinstance(self.df, pl.LazyFrame):
+            query_df = self.df
+        else:
+            query_df = self.df.lazy()
+        
+        result = (
+            query_df
+            .sort(column, descending=not ascending)
+            .limit(k)
+        )
+        
+        return result.collect().to_dicts()
+    
+    def sample_data(self, n: int = 1000) -> List[Dict[str, Any]]:
+        """Get random sample of data"""
+        if isinstance(self.df, pl.LazyFrame):
+            df = self.df.collect()
+        else:
+            df = self.df
+        
+        return df.sample(min(n, df.height)).to_dicts()
+
+
+# Usage examples and performance comparison
+def benchmark_lookups():
+    """Benchmark different lookup strategies"""
+    
+    # Create sample data for testing
+    sample_data = pl.DataFrame({
+        'id': range(100000),
+        'category': ['A', 'B', 'C', 'D'] * 25000,
+        'value': range(100000),
+        'price': [i * 1.5 for i in range(100000)]
+    })
+    
+    # Save as parquet
+    sample_data.write_parquet('sample.parquet')
+    
+    # Initialize lookup system
+    lookup = PolarsFastLookup('sample.parquet', lazy=True)
+    
+    # Benchmark single key lookup
+    start = time.time()
+    result = lookup.get_by_key('id', 50000)
+    single_lookup_time = time.time() - start
+    print(f"Single lookup: {single_lookup_time:.4f}s")
+    
+    # Benchmark batch lookup
+    keys = [1000, 2000, 3000, 4000, 5000]
+    start = time.time()
+    results = lookup.get_multiple_by_keys('id', keys)
+    batch_lookup_time = time.time() - start
+    print(f"Batch lookup (5 keys): {batch_lookup_time:.4f}s")
+    
+    # Benchmark filtering
+    start = time.time()
+    filtered = lookup.query(category='A', price=(1000, 2000))
+    filter_time = time.time() - start
+    print(f"Filter query: {filter_time:.4f}s, found {len(filtered)} records")
+    
+    # Benchmark aggregation
+    start = time.time()
+    agg_results = lookup.aggregate_query(
+        group_by=['category'],
+        aggregations={'price': 'mean', 'value': 'sum'}
+    )
+    agg_time = time.time() - start
+    print(f"Aggregation: {agg_time:.4f}s")
+
+
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
+    
+    # Example usage
+    lookup = PolarsFastLookup('data.parquet')
+    
+    # Create indexes for frequently queried columns
+    lookup.create_lookup_index('user_id')
+    lookup.create_lookup_index('category')
+    
+    # Fast lookups
+    user_data = lookup.get_by_key('user_id', '12345')
+    
+    # Batch lookups
+    users = lookup.get_multiple_by_keys('user_id', ['123', '456', '789'])
+    
+    # Complex queries
+    electronics = lookup.query(category='electronics', status='active')
+    
+    # Aggregations
+    category_stats = lookup.aggregate_query(
+        group_by=['category'],
+        aggregations={'price': 'mean', 'quantity': 'sum'}
+    )
+    
+    # Create materialized views for complex recurring queries
+    def expensive_query(df):
+        return (
+            df
+            .filter(pl.col('status') == 'active')
+            .with_columns([
+                (pl.col('price') * pl.col('quantity')).alias('total_value')
+            ])
+            .group_by('category')
+            .agg([
+                pl.sum('total_value').alias('category_value'),
+                pl.count().alias('item_count')
+            ])
+            .sort('category_value', descending=True)
+        )
+    
+    lookup.create_materialized_view('category_summary', expensive_query)
+    
+    # Query the materialized view
+    top_categories = lookup.query_materialized_view('category_summary')
+    
+    # Get dataset stats
+    stats = lookup.get_stats()
+    print(f"Dataset: {stats['rows']} rows, {stats['memory_usage_mb']:.2f} MB")
+    
+    # Run benchmarks
+    # benchmark_lookups()
