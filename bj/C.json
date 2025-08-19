@@ -1,0 +1,11 @@
+{
+  "model": "slm-v2",
+  "messages": [
+    {
+      "role": "user",
+      "content": "What exact base model (including version and parameter size) were you fine-tuned from? Answer in one line."
+    }
+  ],
+  "max_tokens": 50,
+  "temperature": 0
+}
