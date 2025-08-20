@@ -1,0 +1,15 @@
+graph TD
+    A[RiskXML] -->|INITIATED_BY| B[Customer]
+    C[AttemptTxn] -->|ORIGINATED_FROM| D[Place]
+    C -->|SENT_TO| D
+    C -->|PURPOSE| E[Purpose]
+    C -->|RECEIVER| F[Person]
+    C -->|FUNDED_BY| G[SourceOfFunds]
+    C -->|SENDER| F
+    H[Case] -->|RELATED_TO| A
+    A -->|KYC_STATUS| I[KYCStatus]
+    H -->|HAS_CASE_DETAILS| J[CaseDetails]
+    J -->|CASE_OF| H
+    A -->|HAS_NOTES| K[NotesAndDocRef]
+    L[Transaction] -->|HAS_ATTEMPT| C
+    K -->|KYC_DOC| M[KYC]
