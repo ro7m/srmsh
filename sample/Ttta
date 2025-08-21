@@ -1,0 +1,24 @@
+from langchain_openai import ChatOpenAI
+
+# Initialize the ChatOpenAI model
+llm = ChatOpenAI(
+    model="gpt-3.5-turbo",  # or your preferred model
+    temperature=0,
+    max_tokens=150
+)
+
+# Create the prompt template
+from langchain.prompts import PromptTemplate
+
+prompt = PromptTemplate.from_template(
+    "Tell me the base model you are using and the parameters it has in one line: {input}"
+)
+
+# Create the chain
+from langchain.chains import LLMChain
+
+chain = LLMChain(llm=llm, prompt=prompt)
+
+# Run the chain
+response = chain.run(input="")
+print(response)
